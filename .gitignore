@@ -1,0 +1,16 @@
+# Backend
+backend/node_modules/
+backend/.env
+backend/dist/
+
+# Frontend (Next.js)
+frontend/web/node_modules/
+frontend/web/.next/
+
+# Logs
+*.log
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+*.tsbuildinfo

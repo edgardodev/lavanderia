@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;700;900&display=swap');
+
+/* Para usar Soulking en producción, agrega el archivo de fuente en /public/fonts y descomenta:
+@font-face {
+  font-family: 'Soulking';
+  src: url('/fonts/SOULKING.woff2') format('woff2');
+  font-display: swap;
+}
+*/
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-aqua: #00C1C1;
+  --brand-yellow: #F8F700;
+}
+
+html, body {
+  min-height: 100%;
+  font-family: 'Mulish', Arial, sans-serif;
+  background: #f7ffff;
+  color: #082f34;
+}
+
+.focus-ring {
+  @apply focus:outline-none focus:ring-4 focus:ring-yellowBrand/60;
+}

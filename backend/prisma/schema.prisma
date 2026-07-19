@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  ADMIN
+}
+
+enum ServiceMode {
+  SELF_SERVICE
+  DONE_FOR_YOU
+}
+
+enum CycleType {
+  WASH
+  DRY
+  FULL
+}
+
+enum ReservationStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum OrderStatus {
+  QUEUED
+  WASHING
+  DRYING
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  VOIDED
+  ERROR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  role         Role     @default(CLIENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reservations  Reservation[]
+  laundryOrders LaundryOrder[]
+  pushTokens    PushToken[]
+  auditLogs     AuditLog[]      @relation("ActorAudit")
+  statusChanges StatusHistory[] @relation("AdminStatusChanges")
+  evidenceUploads EvidencePhoto[] @relation("EvidenceUploader")
+
+  @@index([role])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  timezone  String   @default("America/Bogota")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  machines     Machine[]
+  reservations Reservation[]
+
+  @@unique([name])
+}
+
+model Machine {
+  id        String   @id @default(cuid())
+  code      String
+  branchId  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  reservations Reservation[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+}
+
+model Reservation {
+  id             String            @id @default(cuid())
+  clientId       String
+  branchId       String
+  machineId      String
+  serviceMode    ServiceMode       @default(SELF_SERVICE)
+  cycleType      CycleType
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  status         ReservationStatus @default(PENDING_PAYMENT)
+  amountCents    Int
+  notes          String?           @db.VarChar(500)
+  paymentId      String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  client  User    @relation(fields: [clientId], references: [id])
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  machine Machine @relation(fields: [machineId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([machineId, scheduledStart, scheduledEnd])
+  @@index([status])
+}
+
+model LaundryOrder {
+  id          String      @id @default(cuid())
+  clientId    String
+  serviceMode ServiceMode @default(DONE_FOR_YOU)
+  cycleType   CycleType
+  status      OrderStatus @default(QUEUED)
+  amountCents Int
+  pickupType  String      @default("STORE") // STORE o DELIVERY
+  address     String?     @db.VarChar(250)
+  notes       String?     @db.VarChar(500)
+  paymentId   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  client        User            @relation(fields: [clientId], references: [id])
+  payment       Payment?        @relation(fields: [paymentId], references: [id])
+  statusHistory StatusHistory[]
+  evidencePhotos EvidencePhoto[]
+
+  @@index([clientId, createdAt])
+  @@index([status])
+}
+
+model StatusHistory {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  adminId   String?
+  message   String      @db.VarChar(300)
+  createdAt DateTime    @default(now())
+
+  order LaundryOrder @relation(fields: [orderId], references: [id])
+  admin User?        @relation("AdminStatusChanges", fields: [adminId], references: [id])
+
+  @@index([orderId, createdAt])
+}
+
+model EvidencePhoto {
+  id           String   @id @default(cuid())
+  orderId      String
+  uploadedById String
+  imageUrl     String
+  description  String   @db.VarChar(500)
+  createdAt    DateTime @default(now())
+
+  order      LaundryOrder @relation(fields: [orderId], references: [id])
+  uploadedBy User         @relation("EvidenceUploader", fields: [uploadedById], references: [id])
+
+  @@index([orderId, createdAt])
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @db.VarChar(500)
+  deviceType String? @db.VarChar(50)
+  lastSeenAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, token])
+  @@index([userId])
+}
+
+model Payment {
+  id                 String        @id @default(cuid())
+  provider           String        @default("WOMPI")
+  externalReference  String        @unique
+  status             PaymentStatus @default(PENDING)
+  amountCents        Int
+  currency           String        @default("COP")
+  checkoutUrl        String?       @db.VarChar(1000)
+  wompiTransactionId String?       @db.VarChar(120)
+  rawResponse        Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  reservations  Reservation[]
+  laundryOrders LaundryOrder[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  actor User? @relation("ActorAudit", fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt])
+  @@index([entity, entityId])
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([date])
+}
