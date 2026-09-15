@@ -30,7 +30,11 @@ const upload = multer({
   limits: { fileSize: 6 * 1024 * 1024, files: 4 },
   fileFilter: (_req, file, callback) => {
     const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
-    callback(allowed.has(file.mimetype) ? null : new Error('Tipo de archivo no permitido.'), allowed.has(file.mimetype));
+    if (allowed.has(file.mimetype)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Tipo de archivo no permitido.'));
   },
 });
 
