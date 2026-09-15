@@ -1,14 +1,10 @@
 import 'dotenv/config';
-import argon2 from 'argon2';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { createHash } from 'crypto';
 import express from 'express';
 import helmet from 'helmet';
-import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import multer from 'multer';
-import { nanoid } from 'nanoid';
 import {
   CycleType,
   MachineSlotType,
@@ -20,6 +16,7 @@ import {
   ServiceMode,
 } from '@prisma/client';
 import { apiLimiter, assertProductionSecrets, authLimiter, mutationGuard } from './security.js';
+import { readSession, registerAuthRoutes, type AuthenticatedUser } from './auth.js';
 import { registerWompiPaymentRoutes } from './payments.js';
 
 assertProductionSecrets();
@@ -28,7 +25,13 @@ const prisma = new PrismaClient();
 const app = express();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 6 * 1024 * 1024, files: 4 },
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 4,
+    fields: 10,
+    parts: 16,
+    fieldSize: 16 * 1024,
+  },
   fileFilter: (_req, file, callback) => {
     const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
     if (allowed.has(file.mimetype)) {
@@ -42,13 +45,20 @@ const upload = multer({
 const port = Number(process.env.PORT ?? 4000);
 const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
 const isProduction = process.env.NODE_ENV === 'production';
-const jwtSecret: Secret = process.env.JWT_SECRET ?? 'local_development_secret_change_me';
 const allowedOrigins = new Set([
   webOrigin,
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:3001',
+  ...String(process.env.WEB_ORIGINS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+  ...(isProduction
+    ? []
+    : [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
+      ]),
 ]);
 
 const selfServicePrices: Record<CycleType, number> = {
@@ -86,58 +96,34 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(apiLimiter);
 app.use(mutationGuard(allowedOrigins));
+app.use('/api/auth', authLimiter);
 
 function toWompiCents(amountInCop: number) {
   return amountInCop * 100;
 }
 
-function normalizeWompiCents(amount: number) {
-  return amount < 100000 ? amount * 100 : amount;
-}
-
-function wompiIntegritySignature(reference: string, amountInCents: number, currency: string) {
-  const secret = process.env.WOMPI_INTEGRITY_SECRET ?? '';
-  if (!secret || secret.includes('xxxxx')) return 'local-development-signature';
-  return createHash('sha256').update(`${reference}${amountInCents}${currency}${secret}`).digest('hex');
-}
-
-function hasValidWompiConfig() {
-  const publicKey = process.env.WOMPI_PUBLIC_KEY ?? '';
-  const integritySecret = process.env.WOMPI_INTEGRITY_SECRET ?? '';
-  return Boolean(publicKey && integritySecret && !publicKey.includes('xxxxx') && !integritySecret.includes('xxxxx'));
-}
-
-function signUser(user: { id: string; role: Role }) {
-  const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as SignOptions['expiresIn'] };
-  return jwt.sign({ sub: user.id, role: user.role }, jwtSecret, options);
-}
-
-function currentUserId(req: express.Request) {
-  const token = req.cookies?.auth_token;
-  if (!token) return undefined;
-
-  try {
-    const payload = jwt.verify(token, jwtSecret) as { sub?: string };
-    return payload.sub;
-  } catch {
-    return undefined;
-  }
-}
-
-async function requireUser(req: express.Request, res: express.Response, role?: Role) {
-  const userId = currentUserId(req);
-  if (!userId) {
+async function requireUser(
+  req: express.Request,
+  res: express.Response,
+  role?: Role,
+): Promise<AuthenticatedUser | undefined> {
+  const session = readSession(req);
+  if (!session?.sub || session.purpose !== 'session' || typeof session.ver !== 'number') {
     res.status(401).json({ message: 'Debes iniciar sesión para continuar.' });
     return undefined;
   }
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || !user.isActive) {
+  const user = await prisma.user.findUnique({ where: { id: session.sub } });
+  if (!user || !user.isActive || user.sessionVersion !== session.ver) {
     res.status(401).json({ message: 'Sesión inválida. Inicia sesión nuevamente.' });
     return undefined;
   }
   if (role && user.role !== role) {
     res.status(403).json({ message: 'No tienes permisos para esta acción.' });
+    return undefined;
+  }
+  if (user.role === Role.ADMIN && (session.mfa !== true || !user.mfaEnabled || user.mustChangePassword)) {
+    res.status(403).json({ message: 'El acceso administrativo requiere completar la configuración de seguridad y MFA.' });
     return undefined;
   }
 
@@ -147,7 +133,6 @@ async function requireUser(req: express.Request, res: express.Response, role?: R
 function parseSlot(date: string, slot: string) {
   const [start, end] = slot.split('-');
   if (!date || !start || !end) throw new Error('Fecha o franja inválida');
-
   return {
     scheduledStart: new Date(`${date}T${start}:00-05:00`),
     scheduledEnd: new Date(`${date}T${end}:00-05:00`),
@@ -170,7 +155,6 @@ function validateReservationSlot(date: string, slot: string) {
   }).format(new Date());
 
   if (date < todayBogota) throw new Error('No puedes reservar fechas pasadas.');
-
   const day = selectedDate.getUTCDay();
   const allowed = day === 0 ? allowedSlotByDay.sunday : allowedSlotByDay.weekday;
   if (!allowed.has(slot)) throw new Error('La franja horaria no está disponible para ese día.');
@@ -208,7 +192,10 @@ function reservationDto(reservation: any) {
     id: reservation.id,
     branchId: reservation.branchId,
     machineId: reservation.machineId,
+    machineCode: reservation.machine?.code,
+    branchName: reservation.branch?.name,
     cycleType: reservation.cycleType,
+    status: reservation.status,
     date: formatBogotaDate(reservation.scheduledStart),
     slot: slotFromRange(reservation),
     notes: reservation.notes ?? undefined,
@@ -241,6 +228,7 @@ function orderDto(order: any) {
     pickupType: order.pickupType,
     address: order.address ?? undefined,
     pieces: order.pieces ?? undefined,
+    stainService: Boolean(order.stainService),
     notes: order.notes ?? undefined,
     status: order.status,
     client: order.client
@@ -250,68 +238,11 @@ function orderDto(order: any) {
   };
 }
 
+registerAuthRoutes(app, prisma, requireUser);
+registerWompiPaymentRoutes(app, prisma, requireUser);
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: process.env.APP_NAME ?? 'La Lavanderia Bakery API' });
-});
-
-app.post('/api/auth/register', authLimiter, async (req, res, next) => {
-  try {
-    const name = String(req.body?.name ?? '').trim();
-    const email = String(req.body?.email ?? '').trim().toLowerCase();
-    const phone = String(req.body?.phone ?? '').trim() || undefined;
-    const password = String(req.body?.password ?? '');
-    const consent = Boolean(req.body?.consent);
-
-    if (name.length < 2 || name.length > 100) return res.status(400).json({ message: 'Nombre inválido.' });
-    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 190) return res.status(400).json({ message: 'Correo inválido.' });
-    if (password.length < 10 || password.length > 128) return res.status(400).json({ message: 'La contraseña debe tener entre 10 y 128 caracteres.' });
-    if (!consent) return res.status(400).json({ message: 'Debes aceptar el tratamiento de datos.' });
-
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-    const user = await prisma.user.create({
-      data: { name, email, phone, passwordHash, role: Role.CLIENT },
-      select: { id: true, name: true, email: true, phone: true, role: true },
-    });
-
-    res.status(201).json({ user });
-  } catch (error: any) {
-    if (error?.code === 'P2002') return res.status(409).json({ message: 'Este correo ya está registrado.' });
-    next(error);
-  }
-});
-
-app.post('/api/auth/login', authLimiter, async (req, res, next) => {
-  try {
-    const email = String(req.body?.email ?? '').trim().toLowerCase();
-    const password = String(req.body?.password ?? '');
-    const role = String(req.body?.role ?? '');
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.isActive) return res.status(401).json({ message: 'Credenciales inválidas.' });
-
-    const validPassword = await argon2.verify(user.passwordHash, password);
-    if (!validPassword) return res.status(401).json({ message: 'Credenciales inválidas.' });
-    if (role === 'ADMIN' && user.role !== Role.ADMIN) return res.status(403).json({ message: 'Este usuario no es administrador.' });
-
-    const cookieOptions = {
-      sameSite: 'lax' as const,
-      secure: isProduction,
-      maxAge: 8 * 60 * 60 * 1000,
-    };
-    res.cookie('auth_token', signUser(user), { ...cookieOptions, httpOnly: true });
-    res.cookie('csrf_token', nanoid(), { ...cookieOptions, httpOnly: false });
-
-    res.json({
-      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/auth/logout', async (_req, res) => {
-  res.clearCookie('auth_token', { sameSite: 'lax', secure: isProduction });
-  res.clearCookie('csrf_token', { sameSite: 'lax', secure: isProduction });
-  res.status(204).send();
 });
 
 app.get('/api/branches', async (_req, res, next) => {
@@ -321,7 +252,6 @@ app.get('/api/branches', async (_req, res, next) => {
       include: { machines: { where: { isActive: true }, orderBy: { code: 'asc' } } },
       orderBy: { name: 'asc' },
     });
-
     res.json({
       branches: branches.map((branch) => ({
         id: branch.id,
@@ -411,7 +341,7 @@ app.post('/api/reservations', async (req, res) => {
           scheduledStart,
           scheduledEnd,
           status: ReservationStatus.PENDING_PAYMENT,
-          amountCents: toWompiCents(selfServicePrices[cycleType] ?? selfServicePrices.FULL),
+          amountCents: toWompiCents(selfServicePrices[cycleType]),
           notes,
         },
         include: { client: true, branch: true, machine: true },
@@ -428,7 +358,6 @@ app.post('/api/reservations', async (req, res) => {
           reason: 'Reserva de autoservicio',
         },
       });
-
       return created;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
@@ -464,12 +393,12 @@ app.get('/api/admin/reservations', async (req, res, next) => {
       take: 200,
     });
 
-    res.json({
+    return res.json({
       reservations: reservations.map(reservationDto),
       notifications: reservations.slice(0, 20).map((reservation) => ({
         id: reservation.id,
-        title: 'Nueva reserva de autoservicio',
-        message: `${reservation.client.name} reservó ${reservation.branch.name} · ${reservation.machine.code} · ${formatBogotaDate(reservation.scheduledStart)} ${slotFromRange(reservation)}`,
+        title: 'Reserva de autoservicio',
+        message: `${reservation.client.name} · ${reservation.branch.name} · ${reservation.machine.code} · ${formatBogotaDate(reservation.scheduledStart)} ${slotFromRange(reservation)}`,
         createdAt: reservation.createdAt.toISOString(),
       })),
     });
@@ -501,8 +430,7 @@ app.get('/api/admin/machine-blocks', async (req, res, next) => {
       orderBy: [{ scheduledStart: 'asc' }, { createdAt: 'desc' }],
       take: 200,
     });
-
-    res.json({ blocks: blocks.map(machineBlockDto) });
+    return res.json({ blocks: blocks.map(machineBlockDto) });
   } catch (error) {
     next(error);
   }
@@ -541,7 +469,6 @@ app.post('/api/admin/machine-blocks', async (req, res) => {
         },
         include: { machine: true, branch: true },
       });
-
       await tx.auditLog.create({
         data: {
           actorId: admin.id,
@@ -553,7 +480,6 @@ app.post('/api/admin/machine-blocks', async (req, res) => {
       });
       return created;
     });
-
     return res.status(201).json({ block: machineBlockDto(block) });
   } catch (error: any) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -567,11 +493,8 @@ app.delete('/api/admin/machine-blocks/:blockId', async (req, res, next) => {
   try {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
-
     const blockId = String(req.params.blockId);
-    const block = await prisma.machineSlot.findFirst({
-      where: { id: blockId, type: MachineSlotType.ADMIN_BLOCK },
-    });
+    const block = await prisma.machineSlot.findFirst({ where: { id: blockId, type: MachineSlotType.ADMIN_BLOCK } });
     if (!block) return res.status(404).json({ message: 'Bloqueo no encontrado.' });
 
     await prisma.$transaction([
@@ -590,7 +513,6 @@ app.delete('/api/admin/machine-blocks/:blockId', async (req, res, next) => {
         },
       }),
     ]);
-
     return res.status(204).send();
   } catch (error) {
     next(error);
@@ -627,7 +549,7 @@ app.post('/api/orders', async (req, res, next) => {
         serviceMode: ServiceMode.DONE_FOR_YOU,
         cycleType,
         status: OrderStatus.QUEUED,
-        amountCents: toWompiCents(doneForYouPrices[cycleType] ?? doneForYouPrices.FULL),
+        amountCents: toWompiCents(doneForYouPrices[cycleType]),
         pickupType,
         address,
         pieces: pieces || undefined,
@@ -636,8 +558,7 @@ app.post('/api/orders', async (req, res, next) => {
       },
       include: { client: true },
     });
-
-    res.status(201).json({ order: orderDto(order) });
+    return res.status(201).json({ order: orderDto(order) });
   } catch (error) {
     next(error);
   }
@@ -647,14 +568,12 @@ app.get('/api/admin/orders', async (req, res, next) => {
   try {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
-
     const orders = await prisma.laundryOrder.findMany({
       include: { client: true },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-
-    res.json({ orders: orders.map(orderDto) });
+    return res.json({ orders: orders.map(orderDto) });
   } catch (error) {
     next(error);
   }
@@ -664,7 +583,6 @@ app.patch('/api/admin/orders/:orderId/status', async (req, res, next) => {
   try {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
-
     const orderId = String(req.params.orderId);
     const status = req.body?.status as OrderStatus;
     if (!Object.values(OrderStatus).includes(status)) return res.status(400).json({ message: 'Estado inválido.' });
@@ -674,16 +592,21 @@ app.patch('/api/admin/orders/:orderId/status', async (req, res, next) => {
       data: {
         status,
         statusHistory: {
-          create: {
-            status,
-            adminId: admin.id,
-            message: `Estado actualizado a ${status}`,
-          },
+          create: { status, adminId: admin.id, message: `Estado actualizado a ${status}` },
         },
       },
+      include: { client: true },
     });
-
-    res.json({ order: orderDto(order) });
+    await prisma.auditLog.create({
+      data: {
+        actorId: admin.id,
+        action: 'ORDER_STATUS_CHANGED',
+        entity: 'LAUNDRY_ORDER',
+        entityId: orderId,
+        metadata: { status },
+      },
+    });
+    return res.json({ order: orderDto(order) });
   } catch (error) {
     next(error);
   }
@@ -693,7 +616,6 @@ app.post('/api/admin/orders/:orderId/evidence', upload.array('photos'), async (r
   try {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
-
     const orderId = String(req.params.orderId);
     const description = String(Array.isArray(req.body?.description) ? req.body.description[0] : req.body?.description ?? 'Evidencia cargada')
       .trim()
@@ -705,21 +627,18 @@ app.post('/api/admin/orders/:orderId/evidence', upload.array('photos'), async (r
     if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
 
     const photos = await Promise.all(
-      files.map((file, index) =>
-        prisma.evidencePhoto.create({
-          data: {
-            orderId,
-            uploadedById: admin.id,
-            imageUrl: `pending-storage://${orderId}/${Date.now()}-${index}`,
-            mimeType: file.mimetype,
-            sizeBytes: file.size,
-            description,
-          },
-        }),
-      ),
+      files.map((file, index) => prisma.evidencePhoto.create({
+        data: {
+          orderId,
+          uploadedById: admin.id,
+          imageUrl: `pending-storage://${orderId}/${Date.now()}-${index}`,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          description,
+        },
+      })),
     );
-
-    res.status(201).json({ evidence: photos });
+    return res.status(201).json({ evidence: photos });
   } catch (error) {
     next(error);
   }
@@ -729,7 +648,6 @@ app.post('/api/notifications/token', async (req, res, next) => {
   try {
     const user = await requireUser(req, res);
     if (!user) return;
-
     const token = String(req.body?.token ?? '').trim();
     const deviceType = String(req.body?.deviceType ?? '').trim().slice(0, 50) || undefined;
     if (!token || token.length > 500) return res.status(400).json({ message: 'Token inválido.' });
@@ -739,51 +657,7 @@ app.post('/api/notifications/token', async (req, res, next) => {
       update: { lastSeenAt: new Date(), deviceType },
       create: { userId: user.id, token, deviceType },
     });
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
-
-registerWompiPaymentRoutes(app, prisma, requireUser);
-
-app.post('/api/payments/wompi/checkout', async (req, res, next) => {
-  try {
-    const user = await requireUser(req, res, Role.CLIENT);
-    if (!user) return;
-    if (!hasValidWompiConfig()) {
-      return res.status(503).json({ message: 'Wompi no está configurado en el servidor.' });
-    }
-
-    const type = String(req.body?.type ?? '');
-    const id = String(req.body?.id ?? '');
-    if (!['reservation', 'order'].includes(type) || !id) return res.status(400).json({ message: 'Pago inválido.' });
-
-    let storedAmount: number | undefined;
-    if (type === 'reservation') {
-      storedAmount = (await prisma.reservation.findFirst({ where: { id, clientId: user.id } }))?.amountCents;
-    } else {
-      storedAmount = (await prisma.laundryOrder.findFirst({ where: { id, clientId: user.id } }))?.amountCents;
-    }
-    if (storedAmount == null) return res.status(404).json({ message: 'Servicio no encontrado.' });
-
-    const reference = `${type}-${id}-${Date.now()}`;
-    const currency = process.env.WOMPI_CURRENCY ?? 'COP';
-    const amountInCents = normalizeWompiCents(storedAmount);
-
-    res.json({
-      checkout: {
-        widget: {
-          publicKey: process.env.WOMPI_PUBLIC_KEY,
-          currency,
-          amountInCents,
-          reference,
-          signature: wompiIntegritySignature(reference, amountInCents, currency),
-          redirectUrl: process.env.APP_URL ?? webOrigin,
-        },
-      },
-    });
+    return res.status(204).send();
   } catch (error) {
     next(error);
   }
@@ -791,8 +665,11 @@ app.post('/api/payments/wompi/checkout', async (req, res, next) => {
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ message: 'La carga de archivos supera los límites permitidos.' });
+  }
   const message = isProduction ? 'Error interno del servidor.' : (err?.message ?? 'Error interno del servidor.');
-  res.status(500).json({ message });
+  return res.status(500).json({ message });
 });
 
 app.listen(port, () => {
