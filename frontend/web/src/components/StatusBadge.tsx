@@ -3,6 +3,7 @@ import type { OrderStatus } from '@/types';
 
 const tone: Record<OrderStatus, string> = {
   QUEUED: 'bg-slate-100 text-slate-700',
+  PRE_WASH: 'bg-yellowBrand/50 text-slate-900',
   WASHING: 'bg-aqua/10 text-aqua',
   DRYING: 'bg-cyan-50 text-cyan-700',
   PREPARING: 'bg-yellowBrand text-slate-950',
