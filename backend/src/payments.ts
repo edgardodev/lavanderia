@@ -31,6 +31,12 @@ const FINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.ERROR,
 ]);
 
+function isFailedPaymentStatus(status: PaymentStatus) {
+  return status === PaymentStatus.DECLINED
+    || status === PaymentStatus.VOIDED
+    || status === PaymentStatus.ERROR;
+}
+
 function mapWompiStatus(status: unknown): PaymentStatus | undefined {
   const value = String(status ?? '').toUpperCase();
   if (value === 'PENDING') return PaymentStatus.PENDING;
@@ -348,7 +354,7 @@ export function registerWompiPaymentRoutes(
                 where: { id: reservation.id },
                 data: { status: ReservationStatus.CONFIRMED },
               });
-            } else if ([PaymentStatus.DECLINED, PaymentStatus.VOIDED, PaymentStatus.ERROR].includes(status)) {
+            } else if (isFailedPaymentStatus(status)) {
               await tx.machineSlot.deleteMany({ where: { reservationId: reservation.id } });
               await tx.reservation.update({
                 where: { id: reservation.id },
@@ -363,7 +369,7 @@ export function registerWompiPaymentRoutes(
           });
           if (order) {
             appliedToResource = true;
-            if ([PaymentStatus.DECLINED, PaymentStatus.VOIDED, PaymentStatus.ERROR].includes(status)) {
+            if (isFailedPaymentStatus(status)) {
               await tx.laundryOrder.update({ where: { id: order.id }, data: { paymentId: null } });
             }
           }
