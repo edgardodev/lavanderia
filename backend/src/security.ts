@@ -2,19 +2,51 @@ import { timingSafeEqual } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 
+const baseRateLimit = {
+  standardHeaders: 'draft-7' as const,
+  legacyHeaders: false,
+};
+
 export const authLimiter = rateLimit({
+  ...baseRateLimit,
   windowMs: 15 * 60 * 1000,
   limit: 10,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
   message: { message: 'Demasiados intentos. Intenta nuevamente en unos minutos.' },
 });
 
 export const apiLimiter = rateLimit({
+  ...baseRateLimit,
   windowMs: 60 * 1000,
   limit: 180,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
+  message: { message: 'Demasiadas solicitudes. Intenta nuevamente en unos segundos.' },
+});
+
+export const writeLimiter = rateLimit({
+  ...baseRateLimit,
+  windowMs: 60 * 1000,
+  limit: 60,
+  message: { message: 'Demasiadas operaciones de escritura. Intenta nuevamente en un momento.' },
+});
+
+export const paymentLimiter = rateLimit({
+  ...baseRateLimit,
+  windowMs: 5 * 60 * 1000,
+  limit: 30,
+  message: { message: 'Demasiados intentos de pago. Espera unos minutos antes de intentar nuevamente.' },
+});
+
+export const uploadLimiter = rateLimit({
+  ...baseRateLimit,
+  windowMs: 5 * 60 * 1000,
+  limit: 12,
+  message: { message: 'Demasiadas cargas de archivos. Espera unos minutos antes de continuar.' },
+});
+
+export const webhookLimiter = rateLimit({
+  ...baseRateLimit,
+  windowMs: 60 * 1000,
+  limit: 300,
+  message: { message: 'Límite temporal de eventos alcanzado.' },
 });
 
 function safeEqual(a: string, b: string) {
@@ -89,6 +121,11 @@ export function assertProductionSecrets() {
     'CUSTOMER_SERVICE_EMAIL',
   ]) {
     requireProductionValue(name);
+  }
+
+  const databaseUrl = requireProductionValue('DATABASE_URL');
+  if (!databaseUrl.startsWith('mysql://')) {
+    throw new Error('DATABASE_URL debe usar MySQL en producción.');
   }
 
   if (process.env.WOMPI_ENVIRONMENT !== 'production') {
