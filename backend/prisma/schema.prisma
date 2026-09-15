@@ -170,12 +170,12 @@ model StatusHistory {
 }
 
 model OrderMessage {
-  id          String   @id @default(cuid())
-  orderId     String
-  authorId    String
-  message     String   @db.VarChar(1000)
-  isInternal  Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  orderId    String
+  authorId   String
+  message    String   @db.VarChar(1000)
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   order  LaundryOrder @relation(fields: [orderId], references: [id])
   author User         @relation("OrderMessageAuthor", fields: [authorId], references: [id])
@@ -189,8 +189,8 @@ model EvidencePhoto {
   orderId      String
   uploadedById String
   imageUrl     String   @db.VarChar(500)
-  mimeType     String   @db.VarChar(100)
-  sizeBytes    Int
+  mimeType     String   @default("image/jpeg") @db.VarChar(100)
+  sizeBytes    Int      @default(0)
   description  String   @db.VarChar(500)
   createdAt    DateTime @default(now())
 
