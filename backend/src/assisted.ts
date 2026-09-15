@@ -264,7 +264,7 @@ export function registerAssistedRoutes(
       return res.json({
         clients: clients.map((client) => {
           const activeAssisted = client.laundryOrders.filter(
-            (order) => ![OrderStatus.DELIVERED, OrderStatus.CANCELLED].includes(order.status),
+            (order) => order.status !== OrderStatus.DELIVERED && order.status !== OrderStatus.CANCELLED,
           );
           const dates = [
             ...client.laundryOrders.map((order) => order.updatedAt),
