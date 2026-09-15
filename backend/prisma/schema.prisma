@@ -49,6 +49,11 @@ enum PaymentStatus {
   ERROR
 }
 
+enum MachineSlotType {
+  RESERVATION
+  ADMIN_BLOCK
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -60,13 +65,14 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  reservations    Reservation[]
-  laundryOrders   LaundryOrder[]
-  pushTokens      PushToken[]
-  auditLogs       AuditLog[]      @relation("ActorAudit")
-  statusChanges   StatusHistory[] @relation("AdminStatusChanges")
-  evidenceUploads EvidencePhoto[] @relation("EvidenceUploader")
-  orderMessages   OrderMessage[]  @relation("OrderMessageAuthor")
+  reservations      Reservation[]
+  laundryOrders     LaundryOrder[]
+  pushTokens        PushToken[]
+  auditLogs         AuditLog[]      @relation("ActorAudit")
+  statusChanges     StatusHistory[] @relation("AdminStatusChanges")
+  evidenceUploads   EvidencePhoto[] @relation("EvidenceUploader")
+  orderMessages     OrderMessage[]  @relation("OrderMessageAuthor")
+  adminMachineSlots MachineSlot[]   @relation("AdminMachineSlots")
 
   @@index([role])
 }
@@ -82,6 +88,7 @@ model Branch {
   machines      Machine[]
   reservations  Reservation[]
   laundryOrders LaundryOrder[]
+  machineSlots  MachineSlot[]
 
   @@unique([name])
 }
@@ -95,6 +102,7 @@ model Machine {
 
   branch       Branch        @relation(fields: [branchId], references: [id])
   reservations Reservation[]
+  machineSlots MachineSlot[]
 
   @@unique([branchId, code])
   @@index([branchId])
@@ -116,14 +124,37 @@ model Reservation {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  client  User     @relation(fields: [clientId], references: [id])
-  branch  Branch   @relation(fields: [branchId], references: [id])
-  machine Machine  @relation(fields: [machineId], references: [id])
-  payment Payment? @relation(fields: [paymentId], references: [id])
+  client   User         @relation(fields: [clientId], references: [id])
+  branch   Branch       @relation(fields: [branchId], references: [id])
+  machine  Machine      @relation(fields: [machineId], references: [id])
+  payment  Payment?     @relation(fields: [paymentId], references: [id])
+  slotLock MachineSlot?
 
   @@index([clientId, createdAt])
   @@index([machineId, scheduledStart, scheduledEnd])
   @@index([status])
+}
+
+model MachineSlot {
+  id             String          @id @default(cuid())
+  branchId       String
+  machineId      String
+  type           MachineSlotType
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  reservationId  String?         @unique
+  adminId        String?
+  reason         String?         @db.VarChar(300)
+  createdAt      DateTime        @default(now())
+
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  machine     Machine      @relation(fields: [machineId], references: [id])
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  admin       User?        @relation("AdminMachineSlots", fields: [adminId], references: [id])
+
+  @@unique([machineId, scheduledStart, scheduledEnd])
+  @@index([branchId, scheduledStart])
+  @@index([type, scheduledStart])
 }
 
 model LaundryOrder {
