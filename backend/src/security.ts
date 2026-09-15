@@ -55,6 +55,14 @@ function safeEqual(a: string, b: string) {
   return aBuffer.length === bBuffer.length && timingSafeEqual(aBuffer, bBuffer);
 }
 
+function isSessionlessMutation(path: string) {
+  return path.endsWith('/auth/login')
+    || path.endsWith('/auth/register')
+    || path.endsWith('/auth/admin/login')
+    || path.includes('/auth/admin/security/')
+    || path.endsWith('/payments/wompi/webhook');
+}
+
 export function mutationGuard(allowedOrigins: Set<string>) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -64,14 +72,7 @@ export function mutationGuard(allowedOrigins: Set<string>) {
       return res.status(403).json({ message: 'Origen no permitido.' });
     }
 
-    // Login/register, admin pre-auth and Wompi events do not use the authenticated browser session.
-    if (
-      req.path === '/auth/login'
-      || req.path === '/auth/register'
-      || req.path === '/auth/admin/login'
-      || req.path.startsWith('/auth/admin/security/')
-      || req.path === '/payments/wompi/webhook'
-    ) return next();
+    if (isSessionlessMutation(req.path)) return next();
 
     const authCookie = String(req.cookies?.auth_token ?? '');
     if (!authCookie) return next();
