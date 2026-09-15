@@ -26,7 +26,6 @@ jobs:
         working-directory: backend
         run: |
           npm install firebase-admin@14.4.0 nanoid@latest express@latest --save
-          npm audit fix --omit=dev || true
           npx prisma generate
           npm run build
           npm audit --omit=dev --audit-level=high
@@ -44,7 +43,6 @@ jobs:
           NEXT_PUBLIC_FIREBASE_VAPID_KEY: test
         run: |
           npm install next@16.3.3 firebase@12.19.0 react@19.2.0 react-dom@19.2.0 --save
-          npm audit fix --omit=dev || true
           npm run build
           npm audit --omit=dev --audit-level=high
 
