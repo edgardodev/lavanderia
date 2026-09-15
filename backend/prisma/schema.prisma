@@ -60,12 +60,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  reservations  Reservation[]
-  laundryOrders LaundryOrder[]
-  pushTokens    PushToken[]
-  auditLogs     AuditLog[]      @relation("ActorAudit")
-  statusChanges StatusHistory[] @relation("AdminStatusChanges")
+  reservations    Reservation[]
+  laundryOrders   LaundryOrder[]
+  pushTokens      PushToken[]
+  auditLogs       AuditLog[]      @relation("ActorAudit")
+  statusChanges   StatusHistory[] @relation("AdminStatusChanges")
   evidenceUploads EvidencePhoto[] @relation("EvidenceUploader")
+  orderMessages   OrderMessage[]  @relation("OrderMessageAuthor")
 
   @@index([role])
 }
@@ -78,8 +79,9 @@ model Branch {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  machines     Machine[]
-  reservations Reservation[]
+  machines      Machine[]
+  reservations  Reservation[]
+  laundryOrders LaundryOrder[]
 
   @@unique([name])
 }
@@ -114,9 +116,9 @@ model Reservation {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  client  User    @relation(fields: [clientId], references: [id])
-  branch  Branch  @relation(fields: [branchId], references: [id])
-  machine Machine @relation(fields: [machineId], references: [id])
+  client  User     @relation(fields: [clientId], references: [id])
+  branch  Branch   @relation(fields: [branchId], references: [id])
+  machine Machine  @relation(fields: [machineId], references: [id])
   payment Payment? @relation(fields: [paymentId], references: [id])
 
   @@index([clientId, createdAt])
@@ -125,25 +127,31 @@ model Reservation {
 }
 
 model LaundryOrder {
-  id          String      @id @default(cuid())
-  clientId    String
-  serviceMode ServiceMode @default(DONE_FOR_YOU)
-  cycleType   CycleType
-  status      OrderStatus @default(QUEUED)
-  amountCents Int
-  pickupType  String      @default("STORE") // STORE o DELIVERY
-  address     String?     @db.VarChar(250)
-  notes       String?     @db.VarChar(500)
-  paymentId   String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  clientId     String
+  branchId     String?
+  serviceMode  ServiceMode @default(DONE_FOR_YOU)
+  cycleType    CycleType
+  status       OrderStatus @default(QUEUED)
+  amountCents  Int
+  pickupType   String      @default("STORE")
+  address      String?     @db.VarChar(250)
+  pieces       Int?
+  stainService Boolean     @default(false)
+  notes        String?     @db.VarChar(500)
+  paymentId    String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  client        User            @relation(fields: [clientId], references: [id])
-  payment       Payment?        @relation(fields: [paymentId], references: [id])
-  statusHistory StatusHistory[]
+  client         User            @relation(fields: [clientId], references: [id])
+  branch         Branch?         @relation(fields: [branchId], references: [id])
+  payment        Payment?        @relation(fields: [paymentId], references: [id])
+  statusHistory  StatusHistory[]
   evidencePhotos EvidencePhoto[]
+  messages       OrderMessage[]
 
   @@index([clientId, createdAt])
+  @@index([branchId])
   @@index([status])
 }
 
@@ -161,11 +169,28 @@ model StatusHistory {
   @@index([orderId, createdAt])
 }
 
+model OrderMessage {
+  id          String   @id @default(cuid())
+  orderId     String
+  authorId    String
+  message     String   @db.VarChar(1000)
+  isInternal  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  order  LaundryOrder @relation(fields: [orderId], references: [id])
+  author User         @relation("OrderMessageAuthor", fields: [authorId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@index([authorId, createdAt])
+}
+
 model EvidencePhoto {
   id           String   @id @default(cuid())
   orderId      String
   uploadedById String
-  imageUrl     String
+  imageUrl     String   @db.VarChar(500)
+  mimeType     String   @db.VarChar(100)
+  sizeBytes    Int
   description  String   @db.VarChar(500)
   createdAt    DateTime @default(now())
 
@@ -176,12 +201,12 @@ model EvidencePhoto {
 }
 
 model PushToken {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @db.VarChar(500)
-  deviceType String? @db.VarChar(50)
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @db.VarChar(500)
+  deviceType String?  @db.VarChar(50)
   lastSeenAt DateTime @default(now())
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
