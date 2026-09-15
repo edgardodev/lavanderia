@@ -30,14 +30,14 @@ async function main() {
 
   const branches = [
     { id: 'universidad-metropolitana', name: 'Universidad Metropolitana', address: 'Sede Universidad Metropolitana' },
-    { id: 'cra-46', name: 'Cra 46', address: 'Sede Cra 46' },
+    { id: 'cra-46', name: 'Cra 46 con 93', address: 'Sede Cra 46 con 93' },
     { id: 'villa-carolina', name: 'Villa Carolina', address: 'Sede Villa Carolina' },
   ];
 
   for (const branch of branches) {
     const created = await prisma.branch.upsert({
-      where: { name: branch.name },
-      update: { address: branch.address, isActive: true },
+      where: { id: branch.id },
+      update: { name: branch.name, address: branch.address, isActive: true },
       create: branch,
     });
 
