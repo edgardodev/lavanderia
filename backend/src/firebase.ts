@@ -6,7 +6,11 @@ import { getStorage } from 'firebase-admin/storage';
 function getServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!raw) return undefined;
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON no contiene JSON válido.');
+  }
 }
 
 function ensureFirebase() {
@@ -43,10 +47,20 @@ export async function uploadEvidenceImage(params: {
     validation: 'md5',
     metadata: {
       contentType: params.mimeType,
-      cacheControl: 'private, max-age=300',
+      cacheControl: 'private, no-store, max-age=0',
+      metadata: {
+        orderId: params.orderId,
+        generatedBy: 'laundry-api',
+      },
     },
   });
   return path;
+}
+
+export async function deleteEvidenceImage(path: string) {
+  const app = ensureFirebase();
+  if (!app) return;
+  await getStorage(app).bucket().file(path).delete({ ignoreNotFound: true });
 }
 
 export async function signedEvidenceUrl(path: string) {
@@ -63,18 +77,22 @@ export async function sendPush(tokens: string[], title: string, body: string, da
   const app = ensureFirebase();
   if (!app || tokens.length === 0) return { sent: 0, invalidTokens: [] as string[] };
 
+  const uniqueTokens = [...new Set(tokens)].slice(0, 500);
   const response = await getMessaging(app).sendEachForMulticast({
-    tokens,
+    tokens: uniqueTokens,
     notification: { title, body },
     data,
-    webpush: { notification: { icon: '/logo.png' } },
+    webpush: {
+      notification: { icon: '/logo.png' },
+      fcmOptions: { link: data.url || '/client/dashboard' },
+    },
   });
 
   const invalidTokens = response.responses.flatMap((item, index) => {
     if (item.success) return [];
     const code = item.error?.code ?? '';
     return code.includes('registration-token-not-registered') || code.includes('invalid-registration-token')
-      ? [tokens[index]]
+      ? [uniqueTokens[index]]
       : [];
   });
 
