@@ -20,6 +20,7 @@ import {
   ServiceMode,
 } from '@prisma/client';
 import { apiLimiter, assertProductionSecrets, authLimiter, mutationGuard } from './security.js';
+import { registerWompiPaymentRoutes } from './payments.js';
 
 assertProductionSecrets();
 
@@ -744,6 +745,8 @@ app.post('/api/notifications/token', async (req, res, next) => {
     next(error);
   }
 });
+
+registerWompiPaymentRoutes(app, prisma, requireUser);
 
 app.post('/api/payments/wompi/checkout', async (req, res, next) => {
   try {
