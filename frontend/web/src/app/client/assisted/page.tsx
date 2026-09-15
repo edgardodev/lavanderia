@@ -1,12 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppHeader } from '@/components/AppHeader';
+import { ClientOrderHistory } from '@/components/ClientOrderHistory';
 import { PriceSummary } from '@/components/PriceSummary';
+import { StatusBadge } from '@/components/StatusBadge';
+import { StatusTimeline } from '@/components/StatusTimeline';
 import { WompiCheckoutButton } from '@/components/WompiCheckoutButton';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
 import { branchSeed, businessHours, cycleLabels, doneForYouPrices } from '@/lib/constants';
+import { registerPushNotifications } from '@/lib/fcm';
+import { formatDateTime } from '@/lib/format';
 import type { Branch, CycleType, LaundryOrder, PickupType } from '@/types';
 
 type AssistedDraft = {
@@ -29,6 +34,10 @@ const initialDraft: AssistedDraft = {
   stainService: false,
 };
 
+function branchName(order: LaundryOrder) {
+  return order.branchName ?? branchSeed.find((branch) => branch.id === order.branchId)?.name ?? 'Sede pendiente';
+}
+
 export default function AssistedPage() {
   const [branches, setBranches] = useState<Branch[]>(branchSeed);
   const [draft, setDraft] = useState<AssistedDraft>(initialDraft);
@@ -36,6 +45,10 @@ export default function AssistedPage() {
   const [error, setError] = useState('');
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [orders, setOrders] = useState<LaundryOrder[]>([]);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState('');
   const requestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -50,6 +63,36 @@ export default function AssistedPage() {
       })
       .catch(() => undefined);
   }, []);
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ orders: LaundryOrder[] }>('/client/orders');
+      setOrders(data.orders);
+      setSelectedOrderId((current) => current ?? data.orders.find((order) => !['DELIVERED', 'CANCELLED'].includes(order.status))?.id ?? data.orders[0]?.id ?? null);
+      setHistoryError('');
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : 'No se pudo cargar el seguimiento de tus servicios.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void registerPushNotifications().catch(() => undefined);
+    void loadOrders();
+    const timer = window.setInterval(() => void loadOrders(), 20000);
+    const onFocus = () => void loadOrders();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [loadOrders]);
+
+  const selectedOrder = useMemo(
+    () => orders.find((order) => order.id === selectedOrderId) ?? orders.find((order) => !['DELIVERED', 'CANCELLED'].includes(order.status)) ?? orders[0],
+    [orders, selectedOrderId],
+  );
 
   function update<K extends keyof AssistedDraft>(key: K, value: AssistedDraft[K]) {
     requestKeyRef.current = null;
@@ -83,10 +126,13 @@ export default function AssistedPage() {
       });
       requestKeyRef.current = null;
       setCreatedId(data.order.id);
+      setSelectedOrderId(data.order.id);
+      setOrders((current) => [data.order, ...current.filter((order) => order.id !== data.order.id)]);
       setMessage(data.idempotentReplay
         ? 'La solicitud ya había sido recibida. Recuperamos el mismo servicio sin duplicarlo.'
-        : 'Servicio creado. Continúa con el pago; el progreso quedará disponible en tu panel.');
+        : 'Servicio creado. Continúa con el pago; el seguimiento de tu ropa ya está disponible en esta sección.');
       setDraft((current) => ({ ...initialDraft, branchId: current.branchId }));
+      void loadOrders();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el servicio. Puedes reintentar: no se duplicará la solicitud.');
     } finally {
@@ -164,9 +210,55 @@ export default function AssistedPage() {
           <PriceSummary mode="ASSISTED" cycleType={draft.cycleType} includeStainService={draft.stainService} />
           <Card className="!bg-aqua text-white">
             <h2 className="text-2xl font-black text-yellowBrand">Seguimiento real</h2>
-            <p className="mt-3 text-sm leading-6 text-white/85">El flujo es: recibida y esperando prelavado, prelavado, lavado, secado, revisión/doblado, lista y, cuando corresponda, domicilio y entrega. Cada etapa queda en tu historial.</p>
+            <p className="mt-3 text-sm leading-6 text-white/85">El seguimiento pertenece únicamente a esta modalidad: recibida y esperando prelavado, prelavado, lavado, secado, revisión/doblado, lista y, cuando corresponda, domicilio y entrega.</p>
           </Card>
         </div>
+
+        <section className="grid gap-6 lg:col-span-2 lg:grid-cols-[0.85fr_1.15fr]">
+          <Card>
+            <h2 className="text-2xl font-black text-slate-950">Seguimiento de ropa</h2>
+            <p className="mt-2 text-sm text-slate-500">Aquí ves el avance solamente de los servicios que entregas al equipo para que nosotros hagamos el proceso.</p>
+            {selectedOrder ? (
+              <div className="mt-6">
+                <StatusTimeline currentStatus={selectedOrder.status} pickupType={selectedOrder.pickupType} />
+              </div>
+            ) : (
+              <p className="mt-6 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Cuando crees tu primer servicio “Lo hacemos por ti”, aquí aparecerá su seguimiento.</p>
+            )}
+          </Card>
+
+          <Card>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-black text-slate-950">Mis servicios asistidos</h2>
+                <p className="mt-1 text-sm text-slate-500">Historial y novedades de los servicios de esta modalidad.</p>
+              </div>
+              {orders.length > 1 && (
+                <Select value={selectedOrder?.id ?? ''} onChange={(event) => setSelectedOrderId(event.target.value)} className="max-w-xs">
+                  {orders.map((order) => <option key={order.id} value={order.id}>{branchName(order)} · {formatDateTime(order.createdAt)}</option>)}
+                </Select>
+              )}
+            </div>
+
+            {historyError && <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{historyError}</p>}
+            {historyLoading ? (
+              <p className="mt-6 text-sm font-bold text-slate-500">Cargando servicios...</p>
+            ) : selectedOrder ? (
+              <div className="mt-6 grid gap-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-slate-50 p-4">
+                  <div>
+                    <p className="font-black text-slate-950">{branchName(selectedOrder)} · {cycleLabels[selectedOrder.cycleType]}</p>
+                    <p className="mt-1 text-sm text-slate-500">{selectedOrder.pickupType === 'DELIVERY' ? 'Domicilio' : 'Recoge en sede'}</p>
+                  </div>
+                  <StatusBadge status={selectedOrder.status} />
+                </div>
+                <ClientOrderHistory order={selectedOrder} onChanged={() => void loadOrders()} />
+              </div>
+            ) : (
+              <p className="mt-6 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Aún no tienes servicios asistidos.</p>
+            )}
+          </Card>
+        </section>
       </main>
     </>
   );
