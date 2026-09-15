@@ -32,6 +32,7 @@ enum ReservationStatus {
 
 enum OrderStatus {
   QUEUED
+  PRE_WASH
   WASHING
   DRYING
   PREPARING
