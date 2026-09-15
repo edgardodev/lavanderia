@@ -252,14 +252,23 @@ model Payment {
   status             PaymentStatus @default(PENDING)
   amountCents        Int
   currency           String        @default("COP")
+  environment        String        @default("sandbox") @db.VarChar(20)
+  resourceType       String        @db.VarChar(30)
+  resourceId         String        @db.VarChar(191)
   checkoutUrl        String?       @db.VarChar(1000)
   wompiTransactionId String?       @db.VarChar(120)
   rawResponse        Json?
+  expiresAt          DateTime?
+  processedAt        DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   reservations  Reservation[]
   laundryOrders LaundryOrder[]
+
+  @@index([resourceType, resourceId, createdAt])
+  @@index([status, expiresAt])
+  @@index([wompiTransactionId])
 }
 
 model AuditLog {
