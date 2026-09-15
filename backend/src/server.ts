@@ -28,6 +28,7 @@ import {
 import { readSession, registerAuthRoutes, type AuthenticatedUser } from './auth.js';
 import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
+import { registerIdempotentClientServiceRoutes } from './client-services.js';
 
 assertProductionSecrets();
 
@@ -294,6 +295,7 @@ function machineBlockDto(block: any) {
 registerAuthRoutes(app, prisma, requireUser);
 registerWompiPaymentRoutes(app, prisma, requireUser);
 registerAssistedRoutes(app, prisma, requireUser, upload.array('photos'));
+registerIdempotentClientServiceRoutes(app, prisma, requireUser);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: process.env.APP_NAME ?? 'La Lavanderia Bakery API' });
@@ -375,68 +377,6 @@ app.get('/api/reservations/availability', async (req, res) => {
     });
   } catch (error: any) {
     return res.status(400).json({ message: error?.message ?? 'No se pudo consultar disponibilidad.' });
-  }
-});
-
-app.post('/api/reservations', async (req, res) => {
-  try {
-    const user = await requireUser(req, res, Role.CLIENT);
-    if (!user) return;
-
-    const branchId = String(req.body?.branchId ?? '');
-    const machineId = String(req.body?.machineId ?? '');
-    const cycleType = req.body?.cycleType as CycleType;
-    const date = String(req.body?.date ?? '');
-    const slot = String(req.body?.slot ?? '');
-    const notes = String(req.body?.notes ?? '').trim().slice(0, 500) || undefined;
-    if (!branchId || !machineId || !cycleType || !date || !slot) {
-      return res.status(400).json({ message: 'Faltan datos para crear la reserva.' });
-    }
-    if (!Object.values(CycleType).includes(cycleType)) return res.status(400).json({ message: 'Tipo de ciclo inválido.' });
-
-    const { scheduledStart, scheduledEnd } = validateReservationSlot(date, slot);
-    const reservation = await prisma.$transaction(async (tx) => {
-      const machine = await tx.machine.findFirst({
-        where: { id: machineId, branchId, isActive: true, branch: { isActive: true } },
-      });
-      if (!machine) throw new Error('La máquina no pertenece a la sede seleccionada o no está activa.');
-
-      const created = await tx.reservation.create({
-        data: {
-          clientId: user.id,
-          branchId,
-          machineId,
-          serviceMode: ServiceMode.SELF_SERVICE,
-          cycleType,
-          scheduledStart,
-          scheduledEnd,
-          status: ReservationStatus.PENDING_PAYMENT,
-          amountCents: toWompiCents(selfServicePrices[cycleType]),
-          notes,
-        },
-        include: { client: true, branch: true, machine: true },
-      });
-
-      await tx.machineSlot.create({
-        data: {
-          branchId,
-          machineId,
-          type: MachineSlotType.RESERVATION,
-          scheduledStart,
-          scheduledEnd,
-          reservationId: created.id,
-          reason: 'Reserva de autoservicio',
-        },
-      });
-      return created;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-
-    return res.status(201).json({ reservation: reservationDto(reservation) });
-  } catch (error: any) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return res.status(409).json({ message: 'Esta máquina acaba de ser reservada o bloqueada. Selecciona otra.' });
-    }
-    return res.status(409).json({ message: error?.message ?? 'No se pudo crear la reserva.' });
   }
 });
 
@@ -584,70 +524,6 @@ app.delete('/api/admin/machine-blocks/:blockId', async (req, res, next) => {
       }),
     ]);
     return res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/orders', async (req, res, next) => {
-  try {
-    const user = await requireUser(req, res, Role.CLIENT);
-    if (!user) return;
-
-    const branchId = String(req.body?.branchId ?? '');
-    const cycleType = req.body?.cycleType as CycleType;
-    const pickupType = String(req.body?.pickupType ?? 'STORE');
-    const address = String(req.body?.address ?? '').trim().slice(0, 250) || undefined;
-    const pieces = Number(req.body?.pieces ?? 0);
-    const notes = String(req.body?.notes ?? '').trim().slice(0, 500) || undefined;
-    const stainService = Boolean(req.body?.stainService);
-
-    if (!branchId || !Object.values(CycleType).includes(cycleType)) {
-      return res.status(400).json({ message: 'Sede y tipo de ciclo son obligatorios.' });
-    }
-    if (!['STORE', 'DELIVERY'].includes(pickupType)) return res.status(400).json({ message: 'Tipo de entrega inválido.' });
-    if (pickupType === 'DELIVERY' && !address) return res.status(400).json({ message: 'La dirección es obligatoria para domicilio.' });
-    if (!Number.isInteger(pieces) || pieces < 0 || pieces > 500) return res.status(400).json({ message: 'Cantidad de piezas inválida.' });
-
-    const branch = await prisma.branch.findFirst({ where: { id: branchId, isActive: true } });
-    if (!branch) return res.status(404).json({ message: 'Sede no disponible.' });
-
-    const order = await prisma.laundryOrder.create({
-      data: {
-        clientId: user.id,
-        branchId,
-        serviceMode: ServiceMode.DONE_FOR_YOU,
-        cycleType,
-        status: OrderStatus.QUEUED,
-        amountCents: toWompiCents(doneForYouPrices[cycleType]),
-        pickupType,
-        address,
-        pieces: pieces || undefined,
-        stainService,
-        notes,
-        statusHistory: {
-          create: {
-            status: OrderStatus.QUEUED,
-            message: 'Hemos recibido tu solicitud. La ropa quedará en espera de prelavado cuando ingrese a la sede.',
-          },
-        },
-      },
-      include: { client: true },
-    });
-    return res.status(201).json({
-      order: {
-        id: order.id,
-        branchId: order.branchId,
-        cycleType: order.cycleType,
-        pickupType: order.pickupType,
-        address: order.address ?? undefined,
-        pieces: order.pieces ?? undefined,
-        stainService: order.stainService,
-        notes: order.notes ?? undefined,
-        status: order.status,
-        createdAt: order.createdAt.toISOString(),
-      },
-    });
   } catch (error) {
     next(error);
   }
