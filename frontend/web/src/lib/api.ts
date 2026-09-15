@@ -1,5 +1,17 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+export class ApiError extends Error {
+  status: number;
+  data: unknown;
+
+  constructor(message: string, status: number, data: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
 function getCookie(name: string) {
   if (typeof document === 'undefined') return '';
   const value = `; ${document.cookie}`;
@@ -23,7 +35,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Error inesperado' }));
-    throw new Error(error.message ?? 'Error inesperado');
+    throw new ApiError(error.message ?? 'Error inesperado', response.status, error);
   }
 
   if (response.status === 204) return undefined as T;
