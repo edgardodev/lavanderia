@@ -18,6 +18,7 @@ import {
 import { apiLimiter, assertProductionSecrets, authLimiter, mutationGuard } from './security.js';
 import { readSession, registerAuthRoutes, type AuthenticatedUser } from './auth.js';
 import { registerWompiPaymentRoutes } from './payments.js';
+import { registerAssistedRoutes } from './assisted.js';
 
 assertProductionSecrets();
 
@@ -220,26 +221,9 @@ function machineBlockDto(block: any) {
   };
 }
 
-function orderDto(order: any) {
-  return {
-    id: order.id,
-    branchId: order.branchId,
-    cycleType: order.cycleType,
-    pickupType: order.pickupType,
-    address: order.address ?? undefined,
-    pieces: order.pieces ?? undefined,
-    stainService: Boolean(order.stainService),
-    notes: order.notes ?? undefined,
-    status: order.status,
-    client: order.client
-      ? { name: order.client.name, email: order.client.email, phone: order.client.phone ?? undefined }
-      : undefined,
-    createdAt: order.createdAt.toISOString(),
-  };
-}
-
 registerAuthRoutes(app, prisma, requireUser);
 registerWompiPaymentRoutes(app, prisma, requireUser);
+registerAssistedRoutes(app, prisma, requireUser, upload.array('photos'));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: process.env.APP_NAME ?? 'La Lavanderia Bakery API' });
@@ -252,7 +236,7 @@ app.get('/api/branches', async (_req, res, next) => {
       include: { machines: { where: { isActive: true }, orderBy: { code: 'asc' } } },
       orderBy: { name: 'asc' },
     });
-    res.json({
+    return res.json({
       branches: branches.map((branch) => ({
         id: branch.id,
         name: branch.name,
@@ -555,90 +539,29 @@ app.post('/api/orders', async (req, res, next) => {
         pieces: pieces || undefined,
         stainService,
         notes,
-      },
-      include: { client: true },
-    });
-    return res.status(201).json({ order: orderDto(order) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/admin/orders', async (req, res, next) => {
-  try {
-    const admin = await requireUser(req, res, Role.ADMIN);
-    if (!admin) return;
-    const orders = await prisma.laundryOrder.findMany({
-      include: { client: true },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
-    return res.json({ orders: orders.map(orderDto) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.patch('/api/admin/orders/:orderId/status', async (req, res, next) => {
-  try {
-    const admin = await requireUser(req, res, Role.ADMIN);
-    if (!admin) return;
-    const orderId = String(req.params.orderId);
-    const status = req.body?.status as OrderStatus;
-    if (!Object.values(OrderStatus).includes(status)) return res.status(400).json({ message: 'Estado inválido.' });
-
-    const order = await prisma.laundryOrder.update({
-      where: { id: orderId },
-      data: {
-        status,
         statusHistory: {
-          create: { status, adminId: admin.id, message: `Estado actualizado a ${status}` },
+          create: {
+            status: OrderStatus.QUEUED,
+            message: 'Hemos recibido tu solicitud. La ropa quedará en espera de prelavado cuando ingrese a la sede.',
+          },
         },
       },
       include: { client: true },
     });
-    await prisma.auditLog.create({
-      data: {
-        actorId: admin.id,
-        action: 'ORDER_STATUS_CHANGED',
-        entity: 'LAUNDRY_ORDER',
-        entityId: orderId,
-        metadata: { status },
+    return res.status(201).json({
+      order: {
+        id: order.id,
+        branchId: order.branchId,
+        cycleType: order.cycleType,
+        pickupType: order.pickupType,
+        address: order.address ?? undefined,
+        pieces: order.pieces ?? undefined,
+        stainService: order.stainService,
+        notes: order.notes ?? undefined,
+        status: order.status,
+        createdAt: order.createdAt.toISOString(),
       },
     });
-    return res.json({ order: orderDto(order) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/admin/orders/:orderId/evidence', upload.array('photos'), async (req, res, next) => {
-  try {
-    const admin = await requireUser(req, res, Role.ADMIN);
-    if (!admin) return;
-    const orderId = String(req.params.orderId);
-    const description = String(Array.isArray(req.body?.description) ? req.body.description[0] : req.body?.description ?? 'Evidencia cargada')
-      .trim()
-      .slice(0, 500);
-    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
-    if (files.length === 0) return res.status(400).json({ message: 'Selecciona al menos una foto.' });
-
-    const order = await prisma.laundryOrder.findUnique({ where: { id: orderId }, select: { id: true } });
-    if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
-
-    const photos = await Promise.all(
-      files.map((file, index) => prisma.evidencePhoto.create({
-        data: {
-          orderId,
-          uploadedById: admin.id,
-          imageUrl: `pending-storage://${orderId}/${Date.now()}-${index}`,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          description,
-        },
-      })),
-    );
-    return res.status(201).json({ evidence: photos });
   } catch (error) {
     next(error);
   }
