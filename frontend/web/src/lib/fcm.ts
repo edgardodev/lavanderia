@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import { apiFetch } from './api';
 
@@ -11,19 +11,62 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-export async function registerPushNotifications() {
+let registrationPromise: Promise<void> | null = null;
+let foregroundListenerRegistered = false;
+
+function hasFirebaseConfig() {
+  return Boolean(
+    firebaseConfig.apiKey
+    && firebaseConfig.projectId
+    && firebaseConfig.messagingSenderId
+    && firebaseConfig.appId
+    && process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+  );
+}
+
+async function performRegistration() {
+  if (typeof window === 'undefined' || !hasFirebaseConfig()) return;
   if (!(await isSupported())) return;
-  const permission = await Notification.requestPermission();
+
+  let permission = Notification.permission;
+  if (permission === 'default') permission = await Notification.requestPermission();
   if (permission !== 'granted') return;
 
-  const app = initializeApp(firebaseConfig);
-  const messaging = getMessaging(app);
-  const token = await getToken(messaging, { vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY });
-  if (token) await apiFetch('/notifications/token', { method: 'POST', body: JSON.stringify({ token, deviceType: 'web' }) });
+  const serviceWorkerRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+  await navigator.serviceWorker.ready;
 
-  onMessage(messaging, (payload) => {
-    if (payload.notification?.title) {
-      new Notification(payload.notification.title, { body: payload.notification.body });
-    }
+  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  const messaging = getMessaging(app);
+  const token = await getToken(messaging, {
+    vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+    serviceWorkerRegistration,
   });
+  if (token) {
+    await apiFetch('/notifications/token', {
+      method: 'POST',
+      body: JSON.stringify({ token, deviceType: 'web' }),
+    });
+  }
+
+  if (!foregroundListenerRegistered) {
+    foregroundListenerRegistered = true;
+    onMessage(messaging, (payload) => {
+      if (payload.notification?.title && Notification.permission === 'granted') {
+        new Notification(payload.notification.title, {
+          body: payload.notification.body,
+          icon: '/logo.png',
+        });
+      }
+    });
+  }
+}
+
+export async function registerPushNotifications() {
+  if (!registrationPromise) {
+    registrationPromise = performRegistration().catch((error) => {
+      registrationPromise = null;
+      throw error;
+    });
+  }
+  return registrationPromise;
 }
