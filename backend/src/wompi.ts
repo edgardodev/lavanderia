@@ -26,6 +26,12 @@ function assertPrefix(value: string, prefix: string, name: string) {
   }
 }
 
+function networkTimeoutMs() {
+  const value = Number(process.env.WOMPI_HTTP_TIMEOUT_MS ?? 8000);
+  if (!Number.isFinite(value)) return 8000;
+  return Math.min(15000, Math.max(3000, Math.trunc(value)));
+}
+
 export function getWompiConfig(): WompiConfig {
   const environment = (process.env.WOMPI_ENVIRONMENT ?? 'sandbox') as WompiEnvironment;
   if (!['sandbox', 'production'].includes(environment)) {
@@ -123,12 +129,21 @@ export function verifyWompiEvent(body: any, headerChecksum?: string) {
 
 export async function fetchWompiTransaction(transactionId: string) {
   const config = getWompiConfig();
-  const response = await fetch(`${config.apiBaseUrl}/transactions/${encodeURIComponent(transactionId)}`, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${config.privateKey}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiBaseUrl}/transactions/${encodeURIComponent(transactionId)}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${config.privateKey}`,
+      },
+      signal: AbortSignal.timeout(networkTimeoutMs()),
+    });
+  } catch (error: any) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error('Wompi no respondió dentro del tiempo permitido.');
+    }
+    throw new Error('No fue posible conectar con Wompi en este momento.');
+  }
 
   if (!response.ok) {
     throw new Error(`Wompi respondió ${response.status} al consultar la transacción.`);
