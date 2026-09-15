@@ -55,6 +55,8 @@ jobs:
           git add backend/package.json backend/package-lock.json frontend/web/package.json frontend/web/package-lock.json
           git diff --cached --quiet && exit 0
           git commit -m "security: refresh patched runtime dependencies"
+          # Build tools may touch tracked generated metadata. Keep only the dependency commit.
+          git reset --hard HEAD
           git fetch origin hardening/admin-workflow
           git rebase origin/hardening/admin-workflow
           git push origin HEAD:hardening/admin-workflow
