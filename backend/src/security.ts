@@ -18,6 +18,7 @@ export const apiLimiter = rateLimit({
   ...baseRateLimit,
   windowMs: 60 * 1000,
   limit: 180,
+  skip: (req) => req.path.endsWith('/payments/wompi/webhook'),
   message: { message: 'Demasiadas solicitudes. Intenta nuevamente en unos segundos.' },
 });
 
