@@ -21,14 +21,14 @@ function getCookie(name: string) {
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  const isFormData = options.body instanceof FormData;
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   if (!isFormData) headers.set('Content-Type', 'application/json');
   const csrf = getCookie('csrf_token');
   if (csrf) headers.set('X-CSRF-Token', csrf);
 
   const controller = new AbortController();
   const timeoutMs = isFormData ? 45_000 : 20_000;
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
   options.signal?.addEventListener('abort', abortFromCaller, { once: true });
 
@@ -46,7 +46,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     }
     throw new Error(`No se pudo conectar con el servidor (${API_URL}). Verifica tu conexión e intenta nuevamente.`);
   } finally {
-    window.clearTimeout(timer);
+    clearTimeout(timer);
     options.signal?.removeEventListener('abort', abortFromCaller);
   }
 
