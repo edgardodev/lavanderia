@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
-import { DataTreatmentConsent } from "@/components/DataTreatmentConsent";
 import { PriceSummary } from "@/components/PriceSummary";
 import { WompiCheckoutButton } from "@/components/WompiCheckoutButton";
 import { Button, Card, Field, Input, Select, Textarea } from "@/components/ui";
@@ -13,9 +12,7 @@ import {
   cycleLabels,
   getTimeSlotsForDate,
   selfServicePrices,
-  storageKeys,
 } from "@/lib/constants";
-import { clearLocal, readLocal, writeLocal } from "@/lib/storage";
 import type { Branch, CycleType, Reservation } from "@/types";
 
 type SelfServiceDraft = {
@@ -25,7 +22,6 @@ type SelfServiceDraft = {
   date: string;
   slot: string;
   notes: string;
-  consent: boolean;
 };
 
 type Availability = {
@@ -43,7 +39,6 @@ const initialDraft: SelfServiceDraft = {
   date: today,
   slot: "",
   notes: "",
-  consent: false,
 };
 
 export default function SelfServicePage() {
@@ -54,9 +49,10 @@ export default function SelfServicePage() {
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const requestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setDraft(readLocal<SelfServiceDraft>(storageKeys.selfServiceDraft, initialDraft));
     apiFetch<{ branches: Branch[] }>("/branches")
       .then((data) => {
         const nextBranches = data.branches.length ? data.branches : branchSeed;
@@ -69,18 +65,13 @@ export default function SelfServicePage() {
           machineId: "",
         }));
       })
-      .catch(() => setBranches(branchSeed));
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudieron cargar las sedes."));
   }, []);
-
-  useEffect(() => {
-    writeLocal(storageKeys.selfServiceDraft, draft);
-  }, [draft]);
 
   const selected = branches.find((branch) => branch.id === draft.branchId) ?? branches[0];
   const slots = useMemo(() => getTimeSlotsForDate(draft.date), [draft.date]);
 
   const loadAvailability = useCallback(async () => {
-    setError("");
     if (!draft.branchId || !draft.date || !draft.slot) {
       setReservedMachineIds([]);
       setBlockedMachineIds([]);
@@ -119,6 +110,8 @@ export default function SelfServicePage() {
   }, [draft.branchId, draft.date, draft.slot, loadAvailability]);
 
   function update<K extends keyof SelfServiceDraft>(key: K, value: SelfServiceDraft[K]) {
+    requestKeyRef.current = null;
+    setCreatedId(null);
     setDraft((current) => {
       const next = { ...current, [key]: value };
       if (key === "branchId") next.machineId = "";
@@ -139,30 +132,38 @@ export default function SelfServicePage() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setMessage("");
     setError("");
+    setSubmitting(true);
 
-    const payload = {
-      branchId: draft.branchId,
-      machineId: draft.machineId,
-      cycleType: draft.cycleType,
-      date: draft.date,
-      slot: draft.slot,
-      notes: draft.notes,
-    };
+    const key = requestKeyRef.current ?? crypto.randomUUID();
+    requestKeyRef.current = key;
 
     try {
-      const data = await apiFetch<{ reservation: Reservation }>("/reservations", {
+      const data = await apiFetch<{ reservation: Reservation; idempotentReplay?: boolean }>("/reservations", {
         method: "POST",
-        body: JSON.stringify(payload),
+        headers: { "Idempotency-Key": key },
+        body: JSON.stringify({
+          branchId: draft.branchId,
+          machineId: draft.machineId,
+          cycleType: draft.cycleType,
+          date: draft.date,
+          slot: draft.slot,
+          notes: draft.notes,
+        }),
       });
+      requestKeyRef.current = null;
       setCreatedId(data.reservation.id);
-      setMessage("Reserva creada. Continúa con el pago desde tu panel.");
-      clearLocal(storageKeys.selfServiceDraft);
+      setMessage(data.idempotentReplay
+        ? "La reserva ya había sido recibida. Recuperamos la misma reserva sin duplicarla."
+        : "Reserva creada. Continúa con el pago desde tu panel.");
       await loadAvailability();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la reserva.");
+      setError(err instanceof Error ? err.message : "No se pudo crear la reserva. Puedes reintentar sin riesgo de duplicarla.");
       await loadAvailability();
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -181,17 +182,13 @@ export default function SelfServicePage() {
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Sede">
                 <Select value={draft.branchId} onChange={(event) => update("branchId", event.target.value)} required>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>{branch.name}</option>
-                  ))}
+                  {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
                 </Select>
               </Field>
               <Field label="Tipo de ciclo">
                 <Select value={draft.cycleType} onChange={(event) => update("cycleType", event.target.value as CycleType)} required>
                   {Object.entries(selfServicePrices).map(([type, price]) => (
-                    <option key={type} value={type}>
-                      {cycleLabels[type as CycleType]} - ${price.toLocaleString("es-CO")}
-                    </option>
+                    <option key={type} value={type}>{cycleLabels[type as CycleType]} - ${price.toLocaleString("es-CO")}</option>
                   ))}
                 </Select>
               </Field>
@@ -230,19 +227,18 @@ export default function SelfServicePage() {
             </Field>
 
             <Field label="Notas opcionales">
-              <Textarea value={draft.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Ej: llegaré 10 minutos antes, necesito soporte, ropa delicada..." />
+              <Textarea value={draft.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Ej: llegaré 10 minutos antes, necesito soporte, ropa delicada..." maxLength={500} />
             </Field>
-
-            <DataTreatmentConsent checked={draft.consent} onChange={(checked) => update("consent", checked)} />
 
             <div className="grid gap-2 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-600">
               <p>{businessHours.weekdays}</p>
               <p>{businessHours.sundayHoliday}</p>
               <p className="text-aqua">{businessHours.selfServiceLimit}</p>
+              <p className="font-normal text-slate-500">La autorización de tratamiento de datos ya queda registrada al crear tu cuenta; esta reserva no solicita un consentimiento duplicado.</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" disabled={!draft.consent || !draft.machineId || !draft.slot}>Reservar</Button>
+              <Button type="submit" disabled={submitting || !draft.machineId || !draft.slot}>{submitting ? "Reservando..." : "Reservar"}</Button>
               {createdId && <WompiCheckoutButton type="reservation" id={createdId} />}
             </div>
             {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</p>}
