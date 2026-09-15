@@ -66,35 +66,38 @@ export const branchSeed: Branch[] = [
 ];
 
 export const statusLabels: Record<OrderStatus, string> = {
-  QUEUED: 'En espera de lavado',
-  WASHING: 'Su ropa se está lavando',
-  DRYING: 'Su ropa se está secando',
-  PREPARING: 'Su ropa se está doblando',
-  READY: 'Ya puede venir por su ropa',
-  OUT_FOR_DELIVERY: 'Su ropa va en camino',
+  QUEUED: 'Recibida · esperando prelavado',
+  PRE_WASH: 'En prelavado',
+  WASHING: 'En lavado',
+  DRYING: 'En secado',
+  PREPARING: 'Revisión, doblado y empaque',
+  READY: 'Lista',
+  OUT_FOR_DELIVERY: 'En domicilio',
   DELIVERED: 'Entregada',
   CANCELLED: 'Cancelada',
 };
 
 export const statusDescriptions: Record<OrderStatus, string> = {
-  QUEUED: 'Orden recibida y priorizada por hora de ingreso.',
-  WASHING: 'La ropa ya está dentro del ciclo de lavado.',
-  DRYING: 'La ropa pasó a secado.',
-  PREPARING: 'El equipo está revisando, doblando y empacando.',
-  READY: 'Pedido listo para recoger en sede.',
-  OUT_FOR_DELIVERY: 'El domiciliario ya salió hacia la dirección registrada.',
-  DELIVERED: 'Servicio cerrado satisfactoriamente.',
+  QUEUED: 'La ropa fue recibida y está esperando la revisión de prelavado.',
+  PRE_WASH: 'La ropa está en prelavado y revisión inicial de manchas o condiciones visibles.',
+  WASHING: 'La ropa está dentro del ciclo de lavado.',
+  DRYING: 'La ropa está en proceso de secado.',
+  PREPARING: 'El equipo está revisando, doblando y empacando la ropa.',
+  READY: 'La ropa está lista para recogida o para preparar el domicilio.',
+  OUT_FOR_DELIVERY: 'La ropa salió hacia la dirección registrada.',
+  DELIVERED: 'Servicio entregado y cerrado.',
   CANCELLED: 'Servicio cancelado o no procesado.',
 };
 
-export const orderFlow: OrderStatus[] = ['QUEUED', 'WASHING', 'DRYING', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'];
-
-export const adminProfiles = [
-  { id: 'admin-01', label: 'Administrador 01', scope: 'Operación general' },
-  { id: 'admin-02', label: 'Administrador 02', scope: 'Sede Universidad Metropolitana' },
-  { id: 'admin-03', label: 'Administrador 03', scope: 'Sede Cra 46 con 93' },
-  { id: 'admin-04', label: 'Administrador 04', scope: 'Sede Villa Carolina' },
-  { id: 'admin-05', label: 'Administrador 05', scope: 'Auditoría y soporte' },
+export const orderFlow: OrderStatus[] = [
+  'QUEUED',
+  'PRE_WASH',
+  'WASHING',
+  'DRYING',
+  'PREPARING',
+  'READY',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
 ];
 
 export const businessHours = {
@@ -104,7 +107,7 @@ export const businessHours = {
 };
 
 export const dataTreatmentText =
-  'Autorizo a La Lavandería & Bakery para recolectar, almacenar, usar y consultar mis datos personales con la finalidad de gestionar reservas, domicilios, pagos, notificaciones del servicio y soporte al cliente, conforme a la Ley 1581 de 2012, el Decreto 1377 de 2013 y la política de tratamiento de datos de la empresa.';
+  'Autorizo a La Lavandería & Bakery para tratar los datos necesarios para gestionar esta solicitud, conforme a la política de tratamiento de datos personales disponible en la aplicación.';
 
 export const storageKeys = {
   registerDraft: 'llb_register_draft_v2',
