@@ -1,117 +1,20 @@
-"use client";
-
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
-import { ClientOrderHistory } from "@/components/ClientOrderHistory";
 import { PriceSummary } from "@/components/PriceSummary";
-import { StatusBadge } from "@/components/StatusBadge";
-import { StatusTimeline } from "@/components/StatusTimeline";
 import { Card, Pill } from "@/components/ui";
-import { apiFetch } from "@/lib/api";
-import { branchSeed, cycleLabels } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format";
-import { registerPushNotifications } from "@/lib/fcm";
-import type { LaundryOrder, Reservation } from "@/types";
-
-function branchName(order: LaundryOrder) {
-  return order.branchName ?? branchSeed.find((branch) => branch.id === order.branchId)?.name ?? "Sede pendiente";
-}
-
-function reservationBranchName(reservation: Reservation) {
-  return reservation.branchName ?? branchSeed.find((branch) => branch.id === reservation.branchId)?.name ?? "Sede pendiente";
-}
-
-const reservationStatusLabel: Record<NonNullable<Reservation["status"]>, string> = {
-  PENDING_PAYMENT: "Pendiente de pago",
-  CONFIRMED: "Confirmada",
-  CANCELLED: "Cancelada",
-  COMPLETED: "Completada",
-};
 
 export default function ClientDashboardPage() {
-  const [orders, setOrders] = useState<LaundryOrder[]>([]);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-
-  const loadData = useCallback(async () => {
-    try {
-      const [orderData, reservationData] = await Promise.all([
-        apiFetch<{ orders: LaundryOrder[] }>("/client/orders"),
-        apiFetch<{ reservations: Reservation[] }>("/client/reservations"),
-      ]);
-      setOrders(orderData.orders);
-      setReservations(reservationData.reservations);
-      setSelectedOrderId((current) => current ?? orderData.orders.find((order) => !["DELIVERED", "CANCELLED"].includes(order.status))?.id ?? orderData.orders[0]?.id ?? null);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo cargar tu historial.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void registerPushNotifications().catch(() => undefined);
-    void loadData();
-    const timer = window.setInterval(() => void loadData(), 20000);
-    const onFocus = () => void loadData();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [loadData]);
-
-  const activeOrder = useMemo(
-    () => orders.find((order) => !["DELIVERED", "CANCELLED"].includes(order.status)),
-    [orders],
-  );
-  const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) ?? activeOrder ?? orders[0],
-    [orders, selectedOrderId, activeOrder],
-  );
-  const upcomingReservation = useMemo(
-    () => reservations.find((reservation) => reservation.status !== "CANCELLED" && reservation.status !== "COMPLETED"),
-    [reservations],
-  );
-
   return (
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-7xl gap-8 px-6 py-12">
-        <section className="grid gap-6 lg:grid-cols-[1fr_0.75fr] lg:items-start">
-          <div>
-            <Pill>Panel usuario</Pill>
-            <h1 className="mt-4 font-title text-5xl leading-tight text-aqua md:text-6xl">¿Cómo quieres lavar hoy?</h1>
-            <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-              Reserva una máquina para autoservicio o deja tu ropa con el equipo y sigue cada etapa desde aquí.
-            </p>
-          </div>
-          <Card className="!bg-aqua text-white">
-            <p className="text-xs font-black uppercase tracking-[0.28em] text-yellowBrand">Estado actual</p>
-            {activeOrder ? (
-              <div className="mt-4 grid gap-3">
-                <StatusBadge status={activeOrder.status} />
-                <h2 className="text-2xl font-black">{cycleLabels[activeOrder.cycleType]} · {branchName(activeOrder)}</h2>
-                <p className="text-sm text-white/85">Creado: {formatDateTime(activeOrder.createdAt)}</p>
-                <p className="text-sm text-white/85">{activeOrder.pickupType === "DELIVERY" ? "Entrega a domicilio" : "Recogida en sede"}</p>
-              </div>
-            ) : upcomingReservation ? (
-              <div className="mt-4 grid gap-2">
-                <p className="text-xl font-black">Próxima reserva de máquina</p>
-                <p className="text-sm text-white/90">{reservationBranchName(upcomingReservation)} · {upcomingReservation.machineCode ?? upcomingReservation.machineId}</p>
-                <p className="text-sm text-white/85">{upcomingReservation.date} · {upcomingReservation.slot}</p>
-              </div>
-            ) : (
-              <p className="mt-4 text-white/85">No tienes servicios activos en este momento.</p>
-            )}
-          </Card>
+        <section>
+          <Pill>Panel usuario</Pill>
+          <h1 className="mt-4 font-title text-5xl leading-tight text-aqua md:text-6xl">¿Cómo quieres lavar hoy?</h1>
+          <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
+            Elige una de las dos rutas. Cada modalidad mantiene su propia información y seguimiento dentro de su sección.
+          </p>
         </section>
-
-        {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</p>}
 
         <section className="grid gap-6 md:grid-cols-2">
           <Card className="relative overflow-hidden">
@@ -132,71 +35,6 @@ export default function ClientDashboardPage() {
             <Link href="/client/assisted" className="mt-6 inline-flex rounded-2xl bg-yellowBrand px-5 py-3 text-sm font-black text-slate-950">Agendar servicio</Link>
           </Card>
         </section>
-
-        <section className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-          <Card>
-            <h2 className="text-2xl font-black text-slate-950">Seguimiento de ropa</h2>
-            <p className="mt-2 text-sm text-slate-500">Cada cambio realizado por el equipo queda registrado y puede generar una notificación.</p>
-            <div className="mt-6">
-              <StatusTimeline currentStatus={selectedOrder?.status ?? "QUEUED"} pickupType={selectedOrder?.pickupType} />
-            </div>
-          </Card>
-
-          <Card>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-black text-slate-950">Mis servicios asistidos</h2>
-                <p className="mt-1 text-sm text-slate-500">Historial guardado en tu cuenta, no en este dispositivo.</p>
-              </div>
-              {orders.length > 1 && (
-                <select value={selectedOrder?.id ?? ""} onChange={(event) => setSelectedOrderId(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700">
-                  {orders.map((order) => <option key={order.id} value={order.id}>{branchName(order)} · {formatDateTime(order.createdAt)}</option>)}
-                </select>
-              )}
-            </div>
-
-            {loading ? (
-              <p className="mt-6 text-sm font-bold text-slate-500">Cargando historial...</p>
-            ) : selectedOrder ? (
-              <div className="mt-6 grid gap-5">
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-slate-50 p-4">
-                  <div>
-                    <p className="font-black text-slate-950">{branchName(selectedOrder)} · {cycleLabels[selectedOrder.cycleType]}</p>
-                    <p className="mt-1 text-sm text-slate-500">{selectedOrder.pickupType === "DELIVERY" ? "Domicilio" : "Recoge en sede"}</p>
-                  </div>
-                  <StatusBadge status={selectedOrder.status} />
-                </div>
-                <ClientOrderHistory order={selectedOrder} onChanged={() => void loadData()} />
-              </div>
-            ) : (
-              <p className="mt-6 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Aún no tienes servicios asistidos.</p>
-            )}
-          </Card>
-        </section>
-
-        <Card>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-2xl font-black text-slate-950">Mis reservas de autoservicio</h2>
-              <p className="mt-1 text-sm text-slate-500">Se leen directamente de tu cuenta y de la base de datos.</p>
-            </div>
-            <Link href="/client/self-service" className="rounded-full border border-aqua/30 px-4 py-2 text-sm font-black text-aqua">Nueva reserva</Link>
-          </div>
-          <div className="mt-6 grid gap-3 md:grid-cols-2">
-            {reservations.slice(0, 12).map((reservation) => (
-              <div key={reservation.id} className="rounded-3xl border border-aqua/10 bg-aqua/5 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-black text-slate-950">{reservationBranchName(reservation)} · {reservation.machineCode ?? reservation.machineId}</p>
-                    <p className="mt-1 text-sm text-slate-600">{reservation.date} · {reservation.slot} · {cycleLabels[reservation.cycleType]}</p>
-                  </div>
-                  {reservation.status && <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">{reservationStatusLabel[reservation.status]}</span>}
-                </div>
-              </div>
-            ))}
-            {!loading && reservations.length === 0 && <p className="text-sm font-bold text-slate-500">Aún no tienes reservas de autoservicio.</p>}
-          </div>
-        </Card>
       </main>
     </>
   );
