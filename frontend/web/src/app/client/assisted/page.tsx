@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { PriceSummary } from '@/components/PriceSummary';
 import { WompiCheckoutButton } from '@/components/WompiCheckoutButton';
@@ -36,6 +36,7 @@ export default function AssistedPage() {
   const [error, setError] = useState('');
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const requestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     apiFetch<{ branches: Branch[] }>('/branches')
@@ -51,18 +52,25 @@ export default function AssistedPage() {
   }, []);
 
   function update<K extends keyof AssistedDraft>(key: K, value: AssistedDraft[K]) {
+    requestKeyRef.current = null;
+    setCreatedId(null);
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setMessage('');
     setError('');
-    setCreatedId(null);
     setSubmitting(true);
+
+    const key = requestKeyRef.current ?? crypto.randomUUID();
+    requestKeyRef.current = key;
+
     try {
-      const data = await apiFetch<{ order: LaundryOrder }>('/orders', {
+      const data = await apiFetch<{ order: LaundryOrder; idempotentReplay?: boolean }>('/orders', {
         method: 'POST',
+        headers: { 'Idempotency-Key': key },
         body: JSON.stringify({
           branchId: draft.branchId,
           cycleType: draft.cycleType,
@@ -73,11 +81,14 @@ export default function AssistedPage() {
           stainService: draft.stainService,
         }),
       });
+      requestKeyRef.current = null;
       setCreatedId(data.order.id);
-      setMessage('Servicio creado. Continúa con el pago; el progreso quedará disponible en tu panel.');
+      setMessage(data.idempotentReplay
+        ? 'La solicitud ya había sido recibida. Recuperamos el mismo servicio sin duplicarlo.'
+        : 'Servicio creado. Continúa con el pago; el progreso quedará disponible en tu panel.');
       setDraft((current) => ({ ...initialDraft, branchId: current.branchId }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear el servicio.');
+      setError(err instanceof Error ? err.message : 'No se pudo crear el servicio. Puedes reintentar: no se duplicará la solicitud.');
     } finally {
       setSubmitting(false);
     }
