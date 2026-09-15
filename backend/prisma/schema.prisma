@@ -55,15 +55,25 @@ enum MachineSlotType {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  phone        String?
-  passwordHash String
-  role         Role     @default(CLIENT)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                        String   @id @default(cuid())
+  name                      String
+  email                     String   @unique
+  phone                     String?
+  passwordHash              String
+  role                      Role     @default(CLIENT)
+  isActive                  Boolean  @default(true)
+  failedLoginAttempts       Int      @default(0)
+  lockedUntil               DateTime?
+  mustChangePassword        Boolean  @default(false)
+  passwordChangedAt         DateTime?
+  sessionVersion            Int      @default(0)
+  lastLoginAt               DateTime?
+  mfaEnabled                Boolean  @default(false)
+  mfaSecretEncrypted        String?  @db.Text
+  mfaPendingSecretEncrypted String?  @db.Text
+  mfaRecoveryHashes         Json?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   reservations      Reservation[]
   laundryOrders     LaundryOrder[]
@@ -73,8 +83,27 @@ model User {
   evidenceUploads   EvidencePhoto[] @relation("EvidenceUploader")
   orderMessages     OrderMessage[]  @relation("OrderMessageAuthor")
   adminMachineSlots MachineSlot[]   @relation("AdminMachineSlots")
+  consents          UserConsent[]
 
   @@index([role])
+  @@index([lockedUntil])
+}
+
+model UserConsent {
+  id            String   @id @default(cuid())
+  userId        String
+  consentType   String   @db.VarChar(50)
+  policyVersion String   @db.VarChar(40)
+  accepted      Boolean
+  textHash      String   @db.VarChar(64)
+  source        String   @default("WEB") @db.VarChar(50)
+  userAgent     String?  @db.VarChar(300)
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType, createdAt])
+  @@index([consentType, policyVersion])
 }
 
 model Branch {
