@@ -208,10 +208,6 @@ export default function AssistedPage() {
 
         <div className="grid gap-6">
           <PriceSummary mode="ASSISTED" cycleType={draft.cycleType} includeStainService={draft.stainService} />
-          <Card className="!bg-aqua text-white">
-            <h2 className="text-2xl font-black text-yellowBrand">Seguimiento real</h2>
-            <p className="mt-3 text-sm leading-6 text-white/85">El seguimiento pertenece únicamente a esta modalidad: recibida y esperando prelavado, prelavado, lavado, secado, revisión/doblado, lista y, cuando corresponda, domicilio y entrega.</p>
-          </Card>
         </div>
 
         <section className="grid gap-6 lg:col-span-2 lg:grid-cols-[0.85fr_1.15fr]">
