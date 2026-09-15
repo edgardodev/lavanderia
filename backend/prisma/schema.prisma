@@ -141,6 +141,7 @@ model Machine {
 
 model Reservation {
   id             String            @id @default(cuid())
+  requestKey     String?           @unique @db.VarChar(80)
   clientId       String
   branchId       String
   machineId      String
@@ -190,6 +191,7 @@ model MachineSlot {
 
 model LaundryOrder {
   id           String      @id @default(cuid())
+  requestKey   String?     @unique @db.VarChar(80)
   clientId     String
   branchId     String?
   serviceMode  ServiceMode @default(DONE_FOR_YOU)
