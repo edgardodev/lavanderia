@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { getStorage } from 'firebase-admin/storage';
@@ -35,7 +36,7 @@ export async function uploadEvidenceImage(params: {
   if (!app) throw new Error('Firebase Storage no está configurado.');
 
   const bucket = getStorage(app).bucket();
-  const path = `evidence/${params.orderId}/${crypto.randomUUID()}.${params.extension}`;
+  const path = `evidence/${params.orderId}/${randomUUID()}.${params.extension}`;
   const file = bucket.file(path);
   await file.save(params.buffer, {
     resumable: false,
@@ -66,9 +67,7 @@ export async function sendPush(tokens: string[], title: string, body: string, da
     tokens,
     notification: { title, body },
     data,
-    webpush: {
-      notification: { icon: '/logo.png' },
-    },
+    webpush: { notification: { icon: '/logo.png' } },
   });
 
   const invalidTokens = response.responses.flatMap((item, index) => {
