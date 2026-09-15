@@ -25,6 +25,7 @@ export const writeLimiter = rateLimit({
   ...baseRateLimit,
   windowMs: 60 * 1000,
   limit: 60,
+  skip: (req) => req.path.endsWith('/payments/wompi/webhook'),
   message: { message: 'Demasiadas operaciones de escritura. Intenta nuevamente en un momento.' },
 });
 
