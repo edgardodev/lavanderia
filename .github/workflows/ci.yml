@@ -121,6 +121,16 @@ jobs:
             cat /tmp/lavanderia-api.log
             exit 1
           fi
+      - name: Run bounded concurrency smoke
+        env:
+          TARGET_URL: http://127.0.0.1:4000
+          PATHNAME: /api/health
+          REQUESTS: 100
+          CONCURRENCY: 20
+          TIMEOUT_MS: 3000
+          MAX_P95_MS: 1500
+          MAX_ERROR_RATE: 0.02
+        run: node scripts/load-smoke.mjs
       - name: Stop API
         if: always()
         run: |
