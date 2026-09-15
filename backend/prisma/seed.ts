@@ -4,29 +4,80 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  const password = process.env.ADMIN_SEED_PASSWORD;
-  if (!password || password.length < 12) {
-    throw new Error('ADMIN_SEED_PASSWORD debe existir y tener al menos 12 caracteres.');
+function validateBootstrapPassword(password: string, email: string, name: string) {
+  if (password.length < 16 || password.length > 128) {
+    throw new Error('ADMIN_BOOTSTRAP_PASSWORD debe tener entre 16 y 128 caracteres.');
+  }
+  const lower = password.toLowerCase();
+  const predictable = ['password', 'contraseña', '123456', 'qwerty', 'admin', 'lavanderia', 'lalavanderia'];
+  if (predictable.some((value) => lower.includes(value))) {
+    throw new Error('ADMIN_BOOTSTRAP_PASSWORD contiene una palabra o secuencia predecible.');
+  }
+  const localPart = email.split('@')[0]?.toLowerCase();
+  const firstName = name.trim().split(/\s+/)[0]?.toLowerCase();
+  if ((localPart && localPart.length >= 4 && lower.includes(localPart)) || (firstName && firstName.length >= 4 && lower.includes(firstName))) {
+    throw new Error('ADMIN_BOOTSTRAP_PASSWORD no debe contener el nombre ni el correo del administrador.');
+  }
+  const categories = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(password)).length;
+  if (categories < 3) throw new Error('ADMIN_BOOTSTRAP_PASSWORD debe combinar al menos tres tipos de caracteres.');
+}
+
+async function bootstrapAdministrator() {
+  const email = String(process.env.ADMIN_BOOTSTRAP_EMAIL ?? '').trim().toLowerCase();
+  if (!email) {
+    console.log('ADMIN_BOOTSTRAP_EMAIL no definido: no se crearán administradores automáticamente.');
+    return false;
+  }
+
+  const name = String(process.env.ADMIN_BOOTSTRAP_NAME ?? '').trim();
+  const password = String(process.env.ADMIN_BOOTSTRAP_PASSWORD ?? '');
+  if (!name || !/^\S+@\S+\.\S+$/.test(email)) {
+    throw new Error('ADMIN_BOOTSTRAP_NAME y ADMIN_BOOTSTRAP_EMAIL válido son obligatorios para crear el bootstrap.');
+  }
+  validateBootstrapPassword(password, email, name);
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    if (existing.role !== Role.ADMIN) {
+      throw new Error('ADMIN_BOOTSTRAP_EMAIL ya pertenece a una cuenta cliente. Usa otro correo administrativo.');
+    }
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { isActive: true, canManageAdmins: true },
+    });
+    console.log('Administrador bootstrap ya existe: no se modificó su contraseña.');
+    return false;
   }
 
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  const created = await prisma.user.create({
+    data: {
+      name,
+      email,
+      passwordHash,
+      role: Role.ADMIN,
+      isActive: true,
+      canManageAdmins: true,
+      mustChangePassword: true,
+      mfaEnabled: false,
+    },
+  });
 
-  const admins = [1, 2, 3, 4, 5].map((n) => ({
-    name: `Administrador ${n}`,
-    email: `admin${n}@lalavanderiabakery.com`,
-    phone: `300000000${n}`,
-    passwordHash,
-    role: Role.ADMIN,
-  }));
+  await prisma.auditLog.create({
+    data: {
+      actorId: created.id,
+      action: 'ADMIN_BOOTSTRAP_CREATED',
+      entity: 'USER',
+      entityId: created.id,
+      metadata: { email: created.email },
+    },
+  });
+  console.log('Administrador bootstrap creado. Debe cambiar su contraseña y activar MFA en el primer acceso.');
+  return true;
+}
 
-  for (const admin of admins) {
-    await prisma.user.upsert({
-      where: { email: admin.email },
-      update: { passwordHash: admin.passwordHash, role: Role.ADMIN, isActive: true },
-      create: admin,
-    });
-  }
+async function main() {
+  const bootstrapCreated = await bootstrapAdministrator();
 
   const branches = [
     { id: 'universidad-metropolitana', name: 'Universidad Metropolitana', address: 'Sede Universidad Metropolitana' },
@@ -55,11 +106,11 @@ async function main() {
     data: {
       action: 'SEED_EXECUTED',
       entity: 'SYSTEM',
-      metadata: { admins: admins.length, branches: branches.length },
+      metadata: { bootstrapCreated, branches: branches.length },
     },
   });
 
-  console.log('Seed completado con administradores, sedes y máquinas alineadas al frontend.');
+  console.log('Seed completado con sedes y máquinas. No se crean administradores predecibles.');
 }
 
 main()
