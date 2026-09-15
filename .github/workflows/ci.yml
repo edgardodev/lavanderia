@@ -50,3 +50,80 @@ jobs:
           NEXT_PUBLIC_FIREBASE_VAPID_KEY: test
       - name: Audit deployable runtime dependencies
         run: node ../../backend/scripts/audit-runtime.mjs
+
+  integration:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: lavanderia
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: development
+      PORT: 4000
+      WEB_ORIGIN: http://localhost:3000
+      TEST_WEB_ORIGIN: http://localhost:3000
+      TEST_API_URL: http://127.0.0.1:4000/api
+      DATABASE_URL: mysql://root@127.0.0.1:3306/lavanderia
+      ADMIN_BOOTSTRAP_NAME: Ops Root
+      ADMIN_BOOTSTRAP_EMAIL: integration-admin@example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate integration-only secrets
+        run: |
+          node - <<'NODE'
+          const { randomBytes } = require('node:crypto');
+          const fs = require('node:fs');
+          const password = `Z9!${randomBytes(16).toString('hex')}aA`;
+          const jwt = randomBytes(48).toString('base64url');
+          const mfa = randomBytes(32).toString('base64');
+          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN_BOOTSTRAP_PASSWORD=${password}\nJWT_SECRET=${jwt}\nMFA_ENCRYPTION_KEY=${mfa}\n`);
+          NODE
+      - run: npx prisma generate
+      - name: Apply migrations to clean MySQL
+        run: npx prisma migrate deploy
+      - name: Seed branches, machines and bootstrap admin
+        run: npm run seed
+      - run: npm run build
+      - name: Start API and wait for readiness
+        run: |
+          npm start >/tmp/lavanderia-api.log 2>&1 &
+          echo $! >/tmp/lavanderia-api.pid
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/api/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/lavanderia-api.log
+          exit 1
+      - name: Run integration smoke
+        run: |
+          if ! node scripts/integration-smoke.mjs; then
+            cat /tmp/lavanderia-api.log
+            exit 1
+          fi
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/lavanderia-api.pid ]; then
+            kill -TERM "$(cat /tmp/lavanderia-api.pid)" 2>/dev/null || true
+          fi
