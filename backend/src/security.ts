@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 
@@ -23,24 +23,6 @@ function safeEqual(a: string, b: string) {
   return aBuffer.length === bBuffer.length && timingSafeEqual(aBuffer, bBuffer);
 }
 
-function csrfSignature(authCookie: string, nonce: string) {
-  const secret = process.env.JWT_SECRET ?? 'local_development_secret_change_me';
-  return createHmac('sha256', secret).update(`${authCookie}.${nonce}`).digest('base64url');
-}
-
-export function createCsrfToken(authCookie: string, nonce: string) {
-  return `${nonce}.${csrfSignature(authCookie, nonce)}`;
-}
-
-function validateCsrfToken(authCookie: string, token: string) {
-  const separator = token.lastIndexOf('.');
-  if (separator <= 0) return false;
-  const nonce = token.slice(0, separator);
-  const signature = token.slice(separator + 1);
-  if (!nonce || !signature) return false;
-  return safeEqual(signature, csrfSignature(authCookie, nonce));
-}
-
 export function mutationGuard(allowedOrigins: Set<string>) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -50,7 +32,7 @@ export function mutationGuard(allowedOrigins: Set<string>) {
       return res.status(403).json({ message: 'Origen no permitido.' });
     }
 
-    // Login/register and admin pre-auth are protected by strict origin checks and rate limiting.
+    // Login/register, admin pre-auth and Wompi events do not use the authenticated browser session.
     if (
       req.path === '/auth/login'
       || req.path === '/auth/register'
@@ -64,12 +46,7 @@ export function mutationGuard(allowedOrigins: Set<string>) {
 
     const cookieToken = String(req.cookies?.csrf_token ?? '');
     const headerToken = String(req.get('X-CSRF-Token') ?? '');
-    if (
-      !cookieToken
-      || !headerToken
-      || !safeEqual(cookieToken, headerToken)
-      || !validateCsrfToken(authCookie, cookieToken)
-    ) {
+    if (!cookieToken || !headerToken || !safeEqual(cookieToken, headerToken)) {
       return res.status(403).json({ message: 'Solicitud rechazada por protección CSRF.' });
     }
 
