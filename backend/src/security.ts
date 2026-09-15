@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 
@@ -23,6 +23,24 @@ function safeEqual(a: string, b: string) {
   return aBuffer.length === bBuffer.length && timingSafeEqual(aBuffer, bBuffer);
 }
 
+function csrfSignature(authCookie: string, nonce: string) {
+  const secret = process.env.JWT_SECRET ?? 'local_development_secret_change_me';
+  return createHmac('sha256', secret).update(`${authCookie}.${nonce}`).digest('base64url');
+}
+
+export function createCsrfToken(authCookie: string, nonce: string) {
+  return `${nonce}.${csrfSignature(authCookie, nonce)}`;
+}
+
+function validateCsrfToken(authCookie: string, token: string) {
+  const separator = token.lastIndexOf('.');
+  if (separator <= 0) return false;
+  const nonce = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  if (!nonce || !signature) return false;
+  return safeEqual(signature, csrfSignature(authCookie, nonce));
+}
+
 export function mutationGuard(allowedOrigins: Set<string>) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -32,15 +50,26 @@ export function mutationGuard(allowedOrigins: Set<string>) {
       return res.status(403).json({ message: 'Origen no permitido.' });
     }
 
-    // Login/register are protected by origin checks and their own rate limit.
-    if (req.path === '/auth/login' || req.path === '/auth/register') return next();
+    // Login/register and admin pre-auth are protected by strict origin checks and rate limiting.
+    if (
+      req.path === '/auth/login'
+      || req.path === '/auth/register'
+      || req.path === '/auth/admin/login'
+      || req.path.startsWith('/auth/admin/security/')
+      || req.path === '/payments/wompi/webhook'
+    ) return next();
 
-    const authCookie = req.cookies?.auth_token;
+    const authCookie = String(req.cookies?.auth_token ?? '');
     if (!authCookie) return next();
 
     const cookieToken = String(req.cookies?.csrf_token ?? '');
     const headerToken = String(req.get('X-CSRF-Token') ?? '');
-    if (!cookieToken || !headerToken || !safeEqual(cookieToken, headerToken)) {
+    if (
+      !cookieToken
+      || !headerToken
+      || !safeEqual(cookieToken, headerToken)
+      || !validateCsrfToken(authCookie, cookieToken)
+    ) {
       return res.status(403).json({ message: 'Solicitud rechazada por protección CSRF.' });
     }
 
@@ -48,15 +77,61 @@ export function mutationGuard(allowedOrigins: Set<string>) {
   };
 }
 
+function requireProductionValue(name: string) {
+  const value = String(process.env[name] ?? '').trim();
+  if (!value || value.includes('REEMPLAZAR') || value.includes('PENDIENTE')) {
+    throw new Error(`${name} es obligatorio en producción.`);
+  }
+  return value;
+}
+
 export function assertProductionSecrets() {
   if (process.env.NODE_ENV !== 'production') return;
 
-  const jwtSecret = process.env.JWT_SECRET ?? '';
+  const jwtSecret = requireProductionValue('JWT_SECRET');
   if (jwtSecret.length < 32 || jwtSecret.includes('change_me') || jwtSecret.includes('development')) {
     throw new Error('JWT_SECRET inseguro para producción. Usa un secreto aleatorio de al menos 32 caracteres.');
   }
 
-  if (!process.env.WEB_ORIGIN?.startsWith('https://')) {
+  const webOrigin = requireProductionValue('WEB_ORIGIN');
+  if (!webOrigin.startsWith('https://')) {
     throw new Error('WEB_ORIGIN debe usar HTTPS en producción.');
   }
+
+  const mfaKey = Buffer.from(requireProductionValue('MFA_ENCRYPTION_KEY'), 'base64');
+  if (mfaKey.length !== 32) {
+    throw new Error('MFA_ENCRYPTION_KEY debe ser una clave base64 de exactamente 32 bytes.');
+  }
+
+  for (const name of [
+    'LEGAL_ENTITY_NAME',
+    'LEGAL_ENTITY_ID',
+    'LEGAL_ADDRESS',
+    'LEGAL_PHONE',
+    'PRIVACY_CONTACT_EMAIL',
+    'CUSTOMER_SERVICE_EMAIL',
+  ]) {
+    requireProductionValue(name);
+  }
+
+  if (process.env.WOMPI_ENVIRONMENT !== 'production') {
+    throw new Error('WOMPI_ENVIRONMENT debe ser production en un despliegue de producción.');
+  }
+  const publicKey = requireProductionValue('WOMPI_PUBLIC_KEY');
+  const privateKey = requireProductionValue('WOMPI_PRIVATE_KEY');
+  const integritySecret = requireProductionValue('WOMPI_INTEGRITY_SECRET');
+  const eventsSecret = requireProductionValue('WOMPI_EVENTS_SECRET');
+  const redirectUrl = requireProductionValue('WOMPI_REDIRECT_URL');
+  if (!publicKey.startsWith('pub_prod_') || !privateKey.startsWith('prv_prod_')) {
+    throw new Error('Las llaves Wompi de producción deben usar prefijos pub_prod_ y prv_prod_.');
+  }
+  if (!integritySecret.startsWith('prod_') || !eventsSecret.startsWith('prod_')) {
+    throw new Error('Los secretos Wompi de producción deben corresponder al ambiente de producción.');
+  }
+  if (!redirectUrl.startsWith('https://')) {
+    throw new Error('WOMPI_REDIRECT_URL debe usar HTTPS en producción.');
+  }
+
+  requireProductionValue('FIREBASE_STORAGE_BUCKET');
+  requireProductionValue('FIREBASE_SERVICE_ACCOUNT_JSON');
 }
