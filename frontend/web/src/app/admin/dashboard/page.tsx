@@ -35,8 +35,15 @@ type Availability = {
   unavailableMachineIds: string[];
 };
 
-function branchName(branchId: string) {
-  return branchSeed.find((branch) => branch.id === branchId)?.name ?? branchId;
+type MachineCell =
+  | { type: 'FREE' }
+  | { type: 'RESERVED'; reservation: Reservation }
+  | { type: 'BLOCKED'; block: BlockedSlot };
+
+function branchName(branchId: string, branches: Branch[]) {
+  return branches.find((branch) => branch.id === branchId)?.name
+    ?? branchSeed.find((branch) => branch.id === branchId)?.name
+    ?? branchId;
 }
 
 export default function AdminDashboardPage() {
@@ -48,6 +55,7 @@ export default function AdminDashboardPage() {
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
   const [unavailableMachineIds, setUnavailableMachineIds] = useState<string[]>([]);
+  const [machineBoardDate, setMachineBoardDate] = useState(new Date().toISOString().slice(0, 10));
   const [blockForm, setBlockForm] = useState({
     branchId: branchSeed[0]?.id ?? '',
     machineId: '',
@@ -64,6 +72,15 @@ export default function AdminDashboardPage() {
       setBlockedSlots(data.blocks);
     } catch {
       setBlockedSlots([]);
+    }
+  }, []);
+
+  const loadReservations = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ reservations: Reservation[] }>('/admin/reservations');
+      setReservations(data.reservations);
+    } catch {
+      // Conserva datos locales únicamente como respaldo visual durante desarrollo.
     }
   }, []);
 
@@ -88,12 +105,22 @@ export default function AdminDashboardPage() {
       })
       .catch(() => setBranches(branchSeed));
 
-    apiFetch<{ reservations: Reservation[] }>('/admin/reservations')
-      .then((data) => setReservations(data.reservations))
-      .catch(() => undefined);
-
+    void loadReservations();
     void loadBlocks();
-  }, [loadBlocks]);
+  }, [loadBlocks, loadReservations]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void loadReservations();
+      void loadBlocks();
+    };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [loadBlocks, loadReservations]);
 
   const filteredOrders = useMemo(
     () => orders.filter((order) => branchFilter === 'all' || order.branchId === branchFilter),
@@ -109,6 +136,34 @@ export default function AdminDashboardPage() {
   );
   const selectedBranch = branches.find((branch) => branch.id === blockForm.branchId) ?? branches[0];
   const slots = getTimeSlotsForDate(blockForm.date);
+  const boardSlots = useMemo(() => getTimeSlotsForDate(machineBoardDate), [machineBoardDate]);
+  const visibleBranches = useMemo(
+    () => branches.filter((branch) => branchFilter === 'all' || branch.id === branchFilter),
+    [branches, branchFilter],
+  );
+
+  const boardReservations = useMemo(
+    () => reservations.filter((reservation) => reservation.date === machineBoardDate),
+    [reservations, machineBoardDate],
+  );
+  const boardBlocks = useMemo(
+    () => blockedSlots.filter((block) => block.date === machineBoardDate),
+    [blockedSlots, machineBoardDate],
+  );
+
+  function machineCell(branchId: string, machineId: string, slot: string): MachineCell {
+    const reservation = boardReservations.find(
+      (item) => item.branchId === branchId && item.machineId === machineId && item.slot === slot,
+    );
+    if (reservation) return { type: 'RESERVED', reservation };
+
+    const block = boardBlocks.find(
+      (item) => item.branchId === branchId && item.machineId === machineId && item.slot === slot,
+    );
+    if (block) return { type: 'BLOCKED', block };
+
+    return { type: 'FREE' };
+  }
 
   const loadBlockAvailability = useCallback(async () => {
     if (!blockForm.branchId || !blockForm.date || !blockForm.slot) {
@@ -193,7 +248,7 @@ export default function AdminDashboardPage() {
         body: JSON.stringify(blockForm),
       });
       setNotice('Máquina bloqueada. Los usuarios ya no pueden reservarla en esa franja.');
-      await Promise.all([loadBlocks(), loadBlockAvailability()]);
+      await Promise.all([loadBlocks(), loadReservations(), loadBlockAvailability()]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'No se pudo bloquear la máquina.');
       await loadBlockAvailability();
@@ -207,7 +262,7 @@ export default function AdminDashboardPage() {
     try {
       await apiFetch(`/admin/machine-blocks/${blockId}`, { method: 'DELETE' });
       setNotice('Máquina desbloqueada. La franja vuelve a estar disponible si no existe una reserva.');
-      await Promise.all([loadBlocks(), loadBlockAvailability()]);
+      await Promise.all([loadBlocks(), loadReservations(), loadBlockAvailability()]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'No se pudo desbloquear la máquina.');
     }
@@ -257,6 +312,107 @@ export default function AdminDashboardPage() {
           })}
         </section>
 
+        <Card>
+          <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="rounded-2xl bg-aqua/10 p-3 text-aqua"><WashingMachine size={22} /></span>
+                <div>
+                  <h2 className="text-2xl font-black text-slate-950">Mapa visual de máquinas</h2>
+                  <p className="mt-1 text-sm text-slate-500">Disponibilidad por sede, máquina y franja horaria.</p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-black">
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600">Libre</span>
+                <span className="rounded-full bg-aqua px-3 py-1.5 text-white">Reservada</span>
+                <span className="rounded-full bg-yellowBrand px-3 py-1.5 text-slate-950">Bloqueada por sede</span>
+              </div>
+            </div>
+            <Field label="Día a visualizar">
+              <Input type="date" value={machineBoardDate} onChange={(event) => setMachineBoardDate(event.target.value)} />
+            </Field>
+          </div>
+
+          <div className="mt-7 grid gap-6">
+            {visibleBranches.map((branch) => {
+              const branchReservations = boardReservations.filter((reservation) => reservation.branchId === branch.id);
+              const branchBlocks = boardBlocks.filter((block) => block.branchId === branch.id);
+              return (
+                <section key={branch.id} className="overflow-hidden rounded-[1.75rem] border border-aqua/10 bg-slate-50/60">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-aqua/10 bg-white px-5 py-4">
+                    <div>
+                      <h3 className="text-xl font-black text-slate-950">{branch.name}</h3>
+                      <p className="mt-1 text-xs font-bold text-slate-500">{branch.address}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs font-black">
+                      <span className="rounded-full bg-aqua/10 px-3 py-1.5 text-aqua">{branchReservations.length} reservas</span>
+                      <span className="rounded-full bg-yellowBrand/40 px-3 py-1.5 text-slate-800">{branchBlocks.length} bloqueos</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto p-4">
+                    <div className="min-w-[850px]">
+                      <div className="grid grid-cols-[130px_repeat(6,minmax(110px,1fr))] gap-2">
+                        <div className="px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-400">Máquina</div>
+                        {boardSlots.map((slot) => (
+                          <div key={slot.value} className="px-2 py-2 text-center text-xs font-black text-slate-500">{slot.label}</div>
+                        ))}
+                      </div>
+
+                      <div className="mt-1 grid gap-2">
+                        {branch.machines.map((machine) => (
+                          <div key={machine.id} className="grid grid-cols-[130px_repeat(6,minmax(110px,1fr))] gap-2">
+                            <div className="flex min-h-20 items-center rounded-2xl bg-white px-3 py-3 shadow-sm">
+                              <div>
+                                <p className="font-black text-slate-950">{machine.code}</p>
+                                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{branch.name}</p>
+                              </div>
+                            </div>
+
+                            {boardSlots.map((slot) => {
+                              const cell = machineCell(branch.id, machine.id, slot.value);
+                              if (cell.type === 'RESERVED') {
+                                const clientName = cell.reservation.client?.name ?? 'Cliente';
+                                return (
+                                  <div
+                                    key={slot.value}
+                                    title={`${clientName} · ${cell.reservation.slot}`}
+                                    className="flex min-h-20 flex-col justify-center rounded-2xl bg-aqua px-3 py-2 text-white shadow-sm"
+                                  >
+                                    <span className="text-xs font-black">Reservada</span>
+                                    <span className="mt-1 truncate text-[11px] font-bold text-white/85">{clientName}</span>
+                                  </div>
+                                );
+                              }
+                              if (cell.type === 'BLOCKED') {
+                                return (
+                                  <div
+                                    key={slot.value}
+                                    title={cell.block.reason}
+                                    className="flex min-h-20 flex-col justify-center rounded-2xl bg-yellowBrand px-3 py-2 text-slate-950 shadow-sm"
+                                  >
+                                    <span className="text-xs font-black">Bloqueada</span>
+                                    <span className="mt-1 line-clamp-2 text-[11px] font-bold text-slate-700">{cell.block.reason}</span>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={slot.value} className="flex min-h-20 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-400">
+                                  Libre
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </Card>
+
         <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
           <Card>
             <div className="flex items-center justify-between gap-4">
@@ -270,7 +426,7 @@ export default function AdminDashboardPage() {
               {filteredReservations.slice(0, 8).map((reservation) => (
                 <div key={reservation.id} className="grid gap-2 rounded-3xl border border-aqua/10 bg-aqua/5 p-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div>
-                    <p className="font-black text-slate-950">{branchName(reservation.branchId)} · {reservation.machineId}</p>
+                    <p className="font-black text-slate-950">{branchName(reservation.branchId, branches)} · {reservation.machineId}</p>
                     <p className="text-sm text-slate-600">{reservation.date} · {reservation.slot} · {reservation.client?.name ?? 'Cliente autoservicio'}</p>
                   </div>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">Reservada</span>
@@ -336,7 +492,7 @@ export default function AdminDashboardPage() {
               {filteredBlocked.map((block) => (
                 <div key={block.id} className="grid gap-3 rounded-3xl border border-yellowBrand/40 bg-yellowBrand/10 p-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div>
-                    <p className="font-black text-slate-950">{block.branchName ?? branchName(block.branchId)} · {block.machineCode ?? block.machineId}</p>
+                    <p className="font-black text-slate-950">{block.branchName ?? branchName(block.branchId, branches)} · {block.machineCode ?? block.machineId}</p>
                     <p className="text-sm text-slate-600">{block.date} · {block.slot}</p>
                     <p className="mt-1 text-xs font-bold text-slate-500">{block.reason}</p>
                   </div>
@@ -372,7 +528,7 @@ export default function AdminDashboardPage() {
               <div key={order.id} className="rounded-3xl border border-slate-100 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-black text-slate-950">{order.client?.name ?? 'Cliente'} · {branchName(order.branchId)}</p>
+                    <p className="font-black text-slate-950">{order.client?.name ?? 'Cliente'} · {branchName(order.branchId, branches)}</p>
                     <p className="text-sm text-slate-500">{order.pieces ?? 0} piezas · {order.pickupType === 'DELIVERY' ? 'Domicilio' : 'Recoge en sede'}</p>
                   </div>
                   <StatusBadge status={order.status} />
