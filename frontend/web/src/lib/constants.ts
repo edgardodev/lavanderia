@@ -43,8 +43,8 @@ export const branchSeed: Branch[] = [
   },
   {
     id: 'cra-46',
-    name: 'Cra 46',
-    address: 'Sede Cra 46',
+    name: 'Cra 46 con 93',
+    address: 'Sede Cra 46 con 93',
     machines: [
       { id: 'c46-1', code: 'Máquina 1' },
       { id: 'c46-2', code: 'Máquina 2' },
@@ -92,7 +92,7 @@ export const orderFlow: OrderStatus[] = ['QUEUED', 'WASHING', 'DRYING', 'PREPARI
 export const adminProfiles = [
   { id: 'admin-01', label: 'Administrador 01', scope: 'Operación general' },
   { id: 'admin-02', label: 'Administrador 02', scope: 'Sede Universidad Metropolitana' },
-  { id: 'admin-03', label: 'Administrador 03', scope: 'Sede Cra 46' },
+  { id: 'admin-03', label: 'Administrador 03', scope: 'Sede Cra 46 con 93' },
   { id: 'admin-04', label: 'Administrador 04', scope: 'Sede Villa Carolina' },
   { id: 'admin-05', label: 'Administrador 05', scope: 'Auditoría y soporte' },
 ];
