@@ -47,6 +47,8 @@ export interface BlockedSlot {
   id: string;
   branchId: string;
   machineId: string;
+  machineCode?: string;
+  branchName?: string;
   date: string;
   slot: string;
   reason: string;
