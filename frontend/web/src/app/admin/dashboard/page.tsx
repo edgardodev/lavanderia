@@ -2,32 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { BellRing, CalendarClock, Shirt, UsersRound, WashingMachine } from 'lucide-react';
+import { BellRing, CalendarClock, ShieldCheck, Shirt, UsersRound, WashingMachine } from 'lucide-react';
 import { AppHeader } from '@/components/AppHeader';
 import { BranchTabs } from '@/components/BranchTabs';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
-import { branchSeed, getTimeSlotsForDate, statusLabels, storageKeys } from '@/lib/constants';
-import { readLocal } from '@/lib/storage';
+import { branchSeed, getTimeSlotsForDate, statusLabels } from '@/lib/constants';
 import type { BlockedSlot, Branch, LaundryOrder, OrderStatus, Reservation } from '@/types';
-
-const sampleOrders: LaundryOrder[] = [
-  {
-    id: 'demo-1001',
-    branchId: 'universidad-metropolitana',
-    cycleType: 'FULL',
-    pickupType: 'DELIVERY',
-    address: 'Dirección registrada por el cliente',
-    pieces: 34,
-    notes: 'Separar prenda blanca manchada.',
-    status: 'WASHING',
-    client: { name: 'Cliente demo', email: 'cliente@demo.com', phone: '3000000000' },
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const sampleReservations: Reservation[] = [];
 
 type Availability = {
   reservedMachineIds: string[];
@@ -64,32 +46,49 @@ export default function AdminDashboardPage() {
     reason: 'Uso interno: Lo hacemos por ti',
   });
   const [notice, setNotice] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [blocking, setBlocking] = useState(false);
+
+  const recordLoadError = useCallback((error: unknown) => {
+    setLoadError(error instanceof Error ? error.message : 'No se pudo actualizar el dashboard.');
+  }, []);
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ orders: LaundryOrder[] }>('/admin/orders');
+      setOrders(data.orders);
+    } catch (error) {
+      setOrders([]);
+      recordLoadError(error);
+    }
+  }, [recordLoadError]);
 
   const loadBlocks = useCallback(async () => {
     try {
       const data = await apiFetch<{ blocks: BlockedSlot[] }>('/admin/machine-blocks');
       setBlockedSlots(data.blocks);
-    } catch {
+    } catch (error) {
       setBlockedSlots([]);
+      recordLoadError(error);
     }
-  }, []);
+  }, [recordLoadError]);
 
   const loadReservations = useCallback(async () => {
     try {
       const data = await apiFetch<{ reservations: Reservation[] }>('/admin/reservations');
       setReservations(data.reservations);
-    } catch {
-      // Conserva datos locales únicamente como respaldo visual durante desarrollo.
+    } catch (error) {
+      setReservations([]);
+      recordLoadError(error);
     }
-  }, []);
+  }, [recordLoadError]);
+
+  const refreshOperationalData = useCallback(async () => {
+    setLoadError('');
+    await Promise.all([loadOrders(), loadReservations(), loadBlocks()]);
+  }, [loadBlocks, loadOrders, loadReservations]);
 
   useEffect(() => {
-    const localOrders = readLocal<LaundryOrder[]>(storageKeys.assistedOrders, []);
-    const localReservations = readLocal<Reservation[]>(storageKeys.selfServiceReservations, []);
-    setOrders(localOrders.length ? localOrders : sampleOrders);
-    setReservations(localReservations.length ? localReservations : sampleReservations);
-
     apiFetch<{ branches: Branch[] }>('/branches')
       .then((data) => {
         const nextBranches = data.branches.length ? data.branches : branchSeed;
@@ -103,24 +102,20 @@ export default function AdminDashboardPage() {
           };
         });
       })
-      .catch(() => setBranches(branchSeed));
+      .catch(recordLoadError);
 
-    void loadReservations();
-    void loadBlocks();
-  }, [loadBlocks, loadReservations]);
+    void refreshOperationalData();
+  }, [recordLoadError, refreshOperationalData]);
 
   useEffect(() => {
-    const refresh = () => {
-      void loadReservations();
-      void loadBlocks();
-    };
+    const refresh = () => void refreshOperationalData();
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener('focus', refresh);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
     };
-  }, [loadBlocks, loadReservations]);
+  }, [refreshOperationalData]);
 
   const filteredOrders = useMemo(
     () => orders.filter((order) => branchFilter === 'all' || order.branchId === branchFilter),
@@ -195,12 +190,13 @@ export default function AdminDashboardPage() {
         const nextMachine = branch?.machines.find((machine) => !data.unavailableMachineIds.includes(machine.id));
         return { ...current, machineId: nextMachine?.id ?? '' };
       });
-    } catch {
+    } catch (error) {
       setReservedMachineIds([]);
       setBlockedMachineIds([]);
       setUnavailableMachineIds([]);
+      recordLoadError(error);
     }
-  }, [blockForm.branchId, blockForm.date, blockForm.slot, branches]);
+  }, [blockForm.branchId, blockForm.date, blockForm.slot, branches, recordLoadError]);
 
   useEffect(() => {
     void loadBlockAvailability();
@@ -253,7 +249,7 @@ export default function AdminDashboardPage() {
         body: JSON.stringify(blockForm),
       });
       setNotice('Máquina bloqueada. Los usuarios ya no pueden reservarla en esa franja.');
-      await Promise.all([loadBlocks(), loadReservations(), loadBlockAvailability()]);
+      await Promise.all([refreshOperationalData(), loadBlockAvailability()]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'No se pudo bloquear la máquina.');
       await loadBlockAvailability();
@@ -267,7 +263,7 @@ export default function AdminDashboardPage() {
     try {
       await apiFetch(`/admin/machine-blocks/${blockId}`, { method: 'DELETE' });
       setNotice('Máquina desbloqueada. La franja vuelve a estar disponible si no existe una reserva.');
-      await Promise.all([loadBlocks(), loadReservations(), loadBlockAvailability()]);
+      await Promise.all([refreshOperationalData(), loadBlockAvailability()]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'No se pudo desbloquear la máquina.');
     }
@@ -295,8 +291,15 @@ export default function AdminDashboardPage() {
             <Link href="/admin/orders" className="rounded-2xl bg-aqua px-5 py-3 text-sm font-black text-white">Órdenes</Link>
             <Link href="/admin/reservations" className="rounded-2xl bg-yellowBrand px-5 py-3 text-sm font-black text-slate-950">Reservas</Link>
             <Link href="/admin/clients" className="rounded-2xl border border-aqua/30 bg-white px-5 py-3 text-sm font-black text-aqua">Clientes</Link>
+            <Link href="/admin/security" className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-black text-slate-700"><ShieldCheck size={17} /> Seguridad</Link>
           </div>
         </section>
+
+        {loadError && (
+          <div className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-bold text-rose-700">
+            {loadError} Los datos mostrados no se sustituyen por información demo. Reintenta o verifica el backend.
+          </div>
+        )}
 
         <BranchTabs value={branchFilter} onChange={setBranchFilter} />
 
@@ -379,11 +382,7 @@ export default function AdminDashboardPage() {
                               if (cell.type === 'RESERVED') {
                                 const clientName = cell.reservation.client?.name ?? 'Cliente';
                                 return (
-                                  <div
-                                    key={slot.value}
-                                    title={`${clientName} · ${cell.reservation.slot}`}
-                                    className="flex min-h-20 flex-col justify-center rounded-2xl bg-aqua px-3 py-2 text-white shadow-sm"
-                                  >
+                                  <div key={slot.value} title={`${clientName} · ${cell.reservation.slot}`} className="flex min-h-20 flex-col justify-center rounded-2xl bg-aqua px-3 py-2 text-white shadow-sm">
                                     <span className="text-xs font-black">Reservada</span>
                                     <span className="mt-1 truncate text-[11px] font-bold text-white/85">{clientName}</span>
                                   </div>
@@ -391,21 +390,13 @@ export default function AdminDashboardPage() {
                               }
                               if (cell.type === 'BLOCKED') {
                                 return (
-                                  <div
-                                    key={slot.value}
-                                    title={cell.block.reason}
-                                    className="flex min-h-20 flex-col justify-center rounded-2xl bg-yellowBrand px-3 py-2 text-slate-950 shadow-sm"
-                                  >
+                                  <div key={slot.value} title={cell.block.reason} className="flex min-h-20 flex-col justify-center rounded-2xl bg-yellowBrand px-3 py-2 text-slate-950 shadow-sm">
                                     <span className="text-xs font-black">Bloqueada</span>
                                     <span className="mt-1 line-clamp-2 text-[11px] font-bold text-slate-700">{cell.block.reason}</span>
                                   </div>
                                 );
                               }
-                              return (
-                                <div key={slot.value} className="flex min-h-20 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-400">
-                                  Libre
-                                </div>
-                              );
+                              return <div key={slot.value} className="flex min-h-20 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-400">Libre</div>;
                             })}
                           </div>
                         ))}
@@ -431,10 +422,10 @@ export default function AdminDashboardPage() {
               {filteredReservations.slice(0, 8).map((reservation) => (
                 <div key={reservation.id} className="grid gap-2 rounded-3xl border border-aqua/10 bg-aqua/5 p-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div>
-                    <p className="font-black text-slate-950">{branchName(reservation.branchId, branches)} · {reservation.machineId}</p>
+                    <p className="font-black text-slate-950">{branchName(reservation.branchId, branches)} · {reservation.machineCode ?? reservation.machineId}</p>
                     <p className="text-sm text-slate-600">{reservation.date} · {reservation.slot} · {reservation.client?.name ?? 'Cliente autoservicio'}</p>
                   </div>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">Reservada</span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">{reservation.status ?? 'Reservada'}</span>
                 </div>
               ))}
               {filteredReservations.length === 0 && <p className="text-sm font-bold text-slate-500">No hay reservas para esta sede.</p>}
@@ -460,9 +451,7 @@ export default function AdminDashboardPage() {
                   <Select value={blockForm.machineId} onChange={(event) => updateBlockForm('machineId', event.target.value)} required>
                     <option value="">Selecciona máquina</option>
                     {selectedBranch?.machines.map((machine) => (
-                      <option key={machine.id} value={machine.id} disabled={unavailableMachineIds.includes(machine.id)}>
-                        {machineOptionLabel(machine)}
-                      </option>
+                      <option key={machine.id} value={machine.id} disabled={unavailableMachineIds.includes(machine.id)}>{machineOptionLabel(machine)}</option>
                     ))}
                   </Select>
                 </Field>
@@ -481,9 +470,7 @@ export default function AdminDashboardPage() {
               <Field label="Motivo">
                 <Textarea value={blockForm.reason} onChange={(event) => updateBlockForm('reason', event.target.value)} />
               </Field>
-              <Button type="submit" disabled={blocking || !blockForm.machineId || !blockForm.slot}>
-                {blocking ? 'Bloqueando...' : 'Bloquear horario'}
-              </Button>
+              <Button type="submit" disabled={blocking || !blockForm.machineId || !blockForm.slot}>{blocking ? 'Bloqueando...' : 'Bloquear horario'}</Button>
               {notice && <p className="rounded-2xl bg-yellowBrand/40 px-4 py-3 text-sm font-black text-slate-800">{notice}</p>}
             </form>
           </Card>
@@ -501,9 +488,7 @@ export default function AdminDashboardPage() {
                     <p className="text-sm text-slate-600">{block.date} · {block.slot}</p>
                     <p className="mt-1 text-xs font-bold text-slate-500">{block.reason}</p>
                   </div>
-                  <button type="button" onClick={() => void unblock(block.id)} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700">
-                    Desbloquear
-                  </button>
+                  <button type="button" onClick={() => void unblock(block.id)} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700">Desbloquear</button>
                 </div>
               ))}
               {filteredBlocked.length === 0 && <p className="text-sm font-bold text-slate-500">No hay bloqueos activos para esta sede.</p>}
@@ -515,11 +500,11 @@ export default function AdminDashboardPage() {
               <span className="rounded-2xl bg-yellowBrand p-3 text-slate-950"><BellRing size={22} /></span>
               <div>
                 <h2 className="text-2xl font-black text-yellowBrand">Centro de notificaciones</h2>
-                <p className="text-sm text-white/70">Mensajes que recibirá cada usuario activo.</p>
+                <p className="text-sm text-white/70">Etapas notificables del servicio asistido.</p>
               </div>
             </div>
             <div className="mt-6 grid gap-2">
-              {(['QUEUED', 'WASHING', 'DRYING', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'] as OrderStatus[]).map((status) => (
+              {(['QUEUED', 'PRE_WASH', 'WASHING', 'DRYING', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'] as OrderStatus[]).map((status) => (
                 <div key={status} className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-white/90">{statusLabels[status]}</div>
               ))}
             </div>
@@ -540,6 +525,7 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
             ))}
+            {filteredOrders.length === 0 && <p className="text-sm font-bold text-slate-500">No hay órdenes asistidas para esta sede.</p>}
           </div>
         </Card>
       </main>
