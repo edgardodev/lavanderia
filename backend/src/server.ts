@@ -15,15 +15,75 @@ import {
   Role,
   ServiceMode,
 } from '@prisma/client';
-import { apiLimiter, assertProductionSecrets, authLimiter, mutationGuard } from './security.js';
+import {
+  apiLimiter,
+  assertProductionSecrets,
+  authLimiter,
+  mutationGuard,
+  paymentLimiter,
+  uploadLimiter,
+  webhookLimiter,
+  writeLimiter,
+} from './security.js';
 import { readSession, registerAuthRoutes, type AuthenticatedUser } from './auth.js';
 import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
 
 assertProductionSecrets();
 
-const prisma = new PrismaClient();
+function boundedInt(value: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function runtimeDatabaseUrl() {
+  const raw = String(process.env.DATABASE_URL ?? '').trim();
+  if (!raw || !raw.startsWith('mysql://')) return raw || undefined;
+
+  const url = new URL(raw);
+  if (!url.searchParams.has('connection_limit')) {
+    url.searchParams.set('connection_limit', String(boundedInt(process.env.DB_CONNECTION_LIMIT, 10, 2, 50)));
+  }
+  if (!url.searchParams.has('connect_timeout')) url.searchParams.set('connect_timeout', '5');
+  if (!url.searchParams.has('pool_timeout')) url.searchParams.set('pool_timeout', '5');
+  if (!url.searchParams.has('socket_timeout')) url.searchParams.set('socket_timeout', '10');
+  return url.toString();
+}
+
+const prisma = new PrismaClient({
+  ...(runtimeDatabaseUrl() ? { datasourceUrl: runtimeDatabaseUrl() } : {}),
+  transactionOptions: {
+    maxWait: 2_000,
+    timeout: 10_000,
+  },
+});
 const app = express();
+
+function concurrencyGuard(maxConcurrent: number, label: string) {
+  let active = 0;
+  return (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (active >= maxConcurrent) {
+      res.setHeader('Retry-After', '2');
+      return res.status(503).json({ message: `Servidor ocupado en ${label}. Intenta nuevamente en unos segundos.` });
+    }
+
+    active += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      active = Math.max(0, active - 1);
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    next();
+  };
+}
+
+const globalConcurrency = concurrencyGuard(boundedInt(process.env.MAX_CONCURRENT_REQUESTS, 120, 20, 500), 'la API');
+const uploadConcurrency = concurrencyGuard(boundedInt(process.env.MAX_CONCURRENT_UPLOADS, 6, 1, 20), 'carga de evidencias');
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -93,11 +153,21 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(globalConcurrency);
+app.use(express.json({ limit: '256kb', strict: true }));
 app.use(cookieParser());
 app.use(apiLimiter);
 app.use(mutationGuard(allowedOrigins));
 app.use('/api/auth', authLimiter);
+app.use('/api/payments/wompi/checkout', paymentLimiter);
+app.use('/api/payments/wompi/webhook', webhookLimiter);
+app.use('/api/admin/orders/:orderId/evidence', uploadLimiter, uploadConcurrency);
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.path !== '/payments/wompi/webhook') {
+    return writeLimiter(req, res, next);
+  }
+  next();
+});
 
 function toWompiCents(amountInCop: number) {
   return amountInCop * 100;
@@ -227,6 +297,22 @@ registerAssistedRoutes(app, prisma, requireUser, upload.array('photos'));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: process.env.APP_NAME ?? 'La Lavanderia Bakery API' });
+});
+
+let readinessCache: { checkedAt: number; ok: boolean } = { checkedAt: 0, ok: false };
+app.get('/api/ready', async (_req, res) => {
+  const now = Date.now();
+  if (now - readinessCache.checkedAt < 5_000) {
+    return res.status(readinessCache.ok ? 200 : 503).json({ ok: readinessCache.ok });
+  }
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    readinessCache = { checkedAt: now, ok: true };
+    return res.json({ ok: true });
+  } catch {
+    readinessCache = { checkedAt: now, ok: false };
+    return res.status(503).json({ ok: false });
+  }
 });
 
 app.get('/api/branches', async (_req, res, next) => {
@@ -588,13 +674,53 @@ app.post('/api/notifications/token', async (req, res, next) => {
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
+  if (res.headersSent) return;
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ message: 'La carga de archivos supera los límites permitidos.' });
+  }
+  if (err?.code === 'P2024') {
+    return res.status(503).json({ message: 'La base de datos está ocupada. Intenta nuevamente en unos segundos.' });
   }
   const message = isProduction ? 'Error interno del servidor.' : (err?.message ?? 'Error interno del servidor.');
   return res.status(500).json({ message });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`API lista en http://localhost:${port}/api`);
 });
+
+server.requestTimeout = 60_000;
+server.headersTimeout = 15_000;
+server.keepAliveTimeout = 5_000;
+server.timeout = 30_000;
+server.maxRequestsPerSocket = 100;
+server.maxHeadersCount = 100;
+if ('keepAliveTimeoutBuffer' in server) {
+  (server as typeof server & { keepAliveTimeoutBuffer: number }).keepAliveTimeoutBuffer = 1_000;
+}
+
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal}: cerrando API de forma segura...`);
+
+  const forceTimer = setTimeout(() => {
+    server.closeAllConnections?.();
+  }, 8_000);
+  forceTimer.unref();
+
+  server.close(async (error) => {
+    clearTimeout(forceTimer);
+    try {
+      await prisma.$disconnect();
+    } finally {
+      if (error) console.error('Error cerrando servidor', error);
+      process.exit(error ? 1 : 0);
+    }
+  });
+  server.closeIdleConnections?.();
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));
