@@ -1,5 +1,6 @@
 -- Harden authentication state and preserve proof of consent.
 ALTER TABLE `User`
+  ADD COLUMN `canManageAdmins` BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN `failedLoginAttempts` INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN `lockedUntil` DATETIME(3) NULL,
   ADD COLUMN `mustChangePassword` BOOLEAN NOT NULL DEFAULT false,
@@ -37,7 +38,8 @@ ALTER TABLE `UserConsent`
 -- Invalidate all existing administrator sessions and require a secure re-enrollment.
 UPDATE `User`
 SET `mustChangePassword` = true,
-    `sessionVersion` = `sessionVersion` + 1
+    `sessionVersion` = `sessionVersion` + 1,
+    `canManageAdmins` = false
 WHERE `role` = 'ADMIN';
 
 -- Disable the old predictable seed accounts. A production administrator must be bootstrapped explicitly.
