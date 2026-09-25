@@ -155,6 +155,14 @@ export default function AdminReservationsPage() {
                   <p className="mt-3 text-sm text-slate-600">
                     Cliente: {reservation.client?.name ?? 'Sin nombre'} · {reservation.client?.email ?? 'Sin correo'} · {reservation.client?.phone ?? 'Sin celular'}
                   </p>
+                  <p className="mt-2 text-sm font-bold text-slate-600">
+                    Estado: {reservation.status ?? 'PENDING_PAYMENT'} · Pago: {reservation.paymentStatus ?? 'Sin intento de pago'}
+                  </p>
+                  {reservation.status === 'CANCELLED' && reservation.paymentStatus === 'APPROVED' && (
+                    <p className="mt-2 rounded-2xl bg-amber-100 px-3 py-2 text-sm font-black text-amber-900">
+                      Revisión manual: Wompi aprobó el pago, pero la reserva está cancelada. No reasignes una máquina sin confirmar disponibilidad.
+                    </p>
+                  )}
                   {reservation.notes && <p className="mt-1 text-sm font-bold text-slate-600">Notas: {reservation.notes}</p>}
                   <p className="mt-1 text-xs font-bold text-slate-500">Creada: {formatDateTime(reservation.createdAt)}</p>
                 </div>
