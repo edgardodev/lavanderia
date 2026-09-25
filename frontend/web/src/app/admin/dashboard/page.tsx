@@ -8,7 +8,7 @@ import { BranchTabs } from '@/components/BranchTabs';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
-import { branchSeed, getTimeSlotsForDate, statusLabels, timeSlotOptions } from '@/lib/constants';
+import { bogotaToday, branchSeed, getTimeSlotsForDate, statusLabels, timeSlotOptions } from '@/lib/constants';
 import type { BlockedSlot, Branch, LaundryOrder, OrderStatus, Reservation } from '@/types';
 
 type Availability = {
@@ -37,6 +37,8 @@ function branchName(branchId: string, branches: Branch[]) {
     ?? branchId;
 }
 
+const today = bogotaToday();
+
 export default function AdminDashboardPage() {
   const [branches, setBranches] = useState<Branch[]>(branchSeed);
   const [branchFilter, setBranchFilter] = useState('all');
@@ -46,15 +48,15 @@ export default function AdminDashboardPage() {
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
   const [unavailableMachineIds, setUnavailableMachineIds] = useState<string[]>([]);
-  const [machineBoardDate, setMachineBoardDate] = useState(new Date().toISOString().slice(0, 10));
-  const [slots, setSlots] = useState(() => getTimeSlotsForDate(new Date().toISOString().slice(0, 10)));
-  const [boardSlots, setBoardSlots] = useState(() => getTimeSlotsForDate(new Date().toISOString().slice(0, 10)));
+  const [machineBoardDate, setMachineBoardDate] = useState(today);
+  const [slots, setSlots] = useState(() => getTimeSlotsForDate(today));
+  const [boardSlots, setBoardSlots] = useState(() => getTimeSlotsForDate(today));
   const [blockScheduleNote, setBlockScheduleNote] = useState('');
   const [boardScheduleNote, setBoardScheduleNote] = useState('');
   const [blockForm, setBlockForm] = useState({
     branchId: branchSeed[0]?.id ?? '',
     machineId: '',
-    date: new Date().toISOString().slice(0, 10),
+    date: today,
     slot: '',
     reason: 'Uso interno: Lo hacemos por ti',
   });
@@ -518,7 +520,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Día">
-                  <Input type="date" value={blockForm.date} onChange={(event) => updateBlockForm('date', event.target.value)} min={new Date().toISOString().slice(0, 10)} />
+                  <Input type="date" value={blockForm.date} onChange={(event) => updateBlockForm('date', event.target.value)} min={today} />
                 </Field>
                 <Field label="Franja" hint={blockScheduleNote || undefined}>
                   <Select value={blockForm.slot} onChange={(event) => updateBlockForm('slot', event.target.value)} required>
