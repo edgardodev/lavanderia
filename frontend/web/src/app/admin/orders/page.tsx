@@ -6,6 +6,7 @@ import { AdminStatusActions } from '@/components/AdminStatusActions';
 import { BranchTabs } from '@/components/BranchTabs';
 import { EvidenceUploader } from '@/components/EvidenceUploader';
 import { OrderConversation } from '@/components/OrderConversation';
+import { OrderPricingEditor } from '@/components/OrderPricingEditor';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Card, Field, Input, Select } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
@@ -108,6 +109,14 @@ export default function AdminOrdersPage() {
                     <p><strong>Piezas:</strong> {order.pieces ?? 'Sin dato'}</p>
                     <p><strong>Manchas:</strong> {order.stainService ? 'Servicio/revisión de manchas solicitado' : 'No solicitado'}</p>
                     <p><strong>Pago:</strong> {order.paymentStatus ?? 'Sin intento de pago'}</p>
+                    <p><strong>Valor base:</strong> {((order.baseAmountCents ?? order.amountCents ?? 0) / 100).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}</p>
+                    {order.pickupType === 'DELIVERY' && (
+                      <p><strong>Domicilio:</strong> {order.deliveryFeeCents == null ? 'Pendiente por definir' : (order.deliveryFeeCents / 100).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}</p>
+                    )}
+                    {order.stainService && (
+                      <p><strong>Desmanche/despercude:</strong> {order.stainFeeCents == null ? 'Pendiente por definir' : (order.stainFeeCents / 100).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}</p>
+                    )}
+                    <p><strong>Total:</strong> {((order.amountCents ?? 0) / 100).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}</p>
                     <p><strong>Notas:</strong> {order.notes || 'Sin notas'}</p>
                   </div>
 
@@ -128,13 +137,17 @@ export default function AdminOrdersPage() {
                 </div>
 
                 <div className="grid gap-4">
+                  <div className="rounded-[1.5rem] border border-yellowBrand/60 bg-yellowBrand/10 p-4">
+                    <p className="mb-3 text-sm font-black text-slate-950">Valores variables y total a pagar</p>
+                    <OrderPricingEditor order={order} onUpdated={() => void load()} />
+                  </div>
                   <div className="rounded-[1.5rem] border border-aqua/10 p-4">
                     <p className="mb-3 text-sm font-black text-slate-950">Actualizar etapa y notificar</p>
                     <AdminStatusActions
                       orderId={order.id}
                       currentStatus={order.status}
                       pickupType={order.pickupType}
-                      canAdvance={order.paymentStatus === 'APPROVED'}
+                      canAdvance={order.paymentStatus === 'APPROVED' && order.pricingReady !== false}
                       onUpdated={() => void load()}
                     />
                   </div>
