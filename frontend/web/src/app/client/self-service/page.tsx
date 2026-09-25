@@ -49,6 +49,9 @@ export default function SelfServicePage() {
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const requestKeyRef = useRef<string | null>(null);
 
@@ -70,6 +73,29 @@ export default function SelfServicePage() {
 
   const selected = branches.find((branch) => branch.id === draft.branchId) ?? branches[0];
   const slots = useMemo(() => getTimeSlotsForDate(draft.date), [draft.date]);
+
+  const loadReservations = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ reservations: Reservation[] }>("/client/reservations");
+      setReservations(data.reservations);
+      setHistoryError("");
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudo cargar tu historial de autoservicio.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReservations();
+    const timer = window.setInterval(() => void loadReservations(), 20000);
+    const onFocus = () => void loadReservations();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loadReservations]);
 
   const loadAvailability = useCallback(async () => {
     if (!draft.branchId || !draft.date || !draft.slot) {
@@ -158,7 +184,7 @@ export default function SelfServicePage() {
       setMessage(data.idempotentReplay
         ? "La reserva ya había sido recibida. Recuperamos la misma reserva sin duplicarla."
         : "Reserva creada. Continúa con el pago desde tu panel.");
-      await loadAvailability();
+      await Promise.all([loadAvailability(), loadReservations()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear la reserva. Puedes reintentar sin riesgo de duplicarla.");
       await loadAvailability();
@@ -249,6 +275,45 @@ export default function SelfServicePage() {
         <div className="grid gap-6">
           <PriceSummary mode="SELF" cycleType={draft.cycleType} />
         </div>
+
+        <Card className="lg:col-span-2">
+          <div>
+            <h2 className="text-2xl font-black text-slate-950">Mis reservas de autoservicio</h2>
+            <p className="mt-1 text-sm text-slate-500">Aquí puedes consultar reservas anteriores y retomar un pago pendiente después de recargar la página.</p>
+          </div>
+          {historyError && <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{historyError}</p>}
+          {historyLoading ? (
+            <p className="mt-6 text-sm font-bold text-slate-500">Cargando reservas...</p>
+          ) : (
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              {reservations.slice(0, 24).map((reservation) => (
+                <div key={reservation.id} className="rounded-3xl border border-aqua/10 bg-aqua/5 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-black text-slate-950">{reservation.branchName ?? reservation.branchId} · {reservation.machineCode ?? reservation.machineId}</p>
+                      <p className="mt-1 text-sm text-slate-600">{reservation.date} · {reservation.slot} · {cycleLabels[reservation.cycleType]}</p>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">{reservation.status ?? "PENDING_PAYMENT"}</span>
+                  </div>
+                  <p className="mt-2 text-xs font-bold text-slate-500">Pago: {reservation.paymentStatus ?? "Sin intento de pago"}</p>
+                  {reservation.status === "PENDING_PAYMENT" && reservation.paymentStatus !== "APPROVED" && (
+                    <div className="mt-4">
+                      <WompiCheckoutButton type="reservation" id={reservation.id} />
+                    </div>
+                  )}
+                  {reservation.status === "CANCELLED" && reservation.paymentStatus === "APPROVED" && (
+                    <p className="mt-3 rounded-2xl bg-amber-100 px-3 py-2 text-sm font-black text-amber-900">
+                      El pago fue aprobado pero la reserva ya no conserva la máquina. Contacta a la sede para conciliación.
+                    </p>
+                  )}
+                </div>
+              ))}
+              {reservations.length === 0 && (
+                <p className="text-sm font-bold text-slate-500">Aún no tienes reservas de autoservicio.</p>
+              )}
+            </div>
+          )}
+        </Card>
       </main>
     </>
   );
