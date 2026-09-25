@@ -89,6 +89,15 @@ async function main() {
   const anon = new CookieJar();
   await api(anon, '/health');
   await api(anon, '/ready');
+  const holiday = await api(anon, '/calendar/day?date=2026-12-25');
+  assert(
+    holiday.data?.scheduleType === 'SUNDAY_HOLIDAY'
+      && holiday.data?.isHoliday === true
+      && Array.isArray(holiday.data?.slots)
+      && holiday.data.slots.length === 4
+      && !holiday.data.slots.includes('07:00-09:00'),
+    'Los festivos no están usando el horario de domingo.',
+  );
   await api(anon, '/admin/orders', { expected: [401] });
 
   const unique = `${Date.now().toString(36)}${randomBytes(4).toString('hex')}`;
@@ -117,7 +126,15 @@ async function main() {
   assert(reservationHistory.data?.reservations?.some((r) => r.id === reservation1.data.reservation.id), 'Reserva ausente del historial.');
 
   const orderKey = `ci_ord_${unique}`;
-  const orderBody = { branchId: branch.id, cycleType: 'FULL', pickupType: 'STORE', pieces: 12, stainService: true, notes: 'Smoke servicio asistido' };
+  const orderBody = {
+    branchId: branch.id,
+    cycleType: 'FULL',
+    pickupType: 'DELIVERY',
+    address: 'Calle 1 # 2-3',
+    pieces: 12,
+    stainService: true,
+    notes: 'Smoke servicio asistido',
+  };
   const order1 = await api(client, '/orders', { method: 'POST', expected: [201], headers: { 'Idempotency-Key': orderKey }, body: orderBody });
   const order2 = await api(client, '/orders', { method: 'POST', headers: { 'Idempotency-Key': orderKey }, body: orderBody });
   assert(order1.data?.order?.id === order2.data?.order?.id && order2.data?.idempotentReplay === true, 'Falló idempotencia de órdenes.');
@@ -137,7 +154,19 @@ async function main() {
   await api(admin, '/admin/clients');
   await api(admin, '/admin/reservations');
   const adminOrders = await api(admin, '/admin/orders');
-  assert(adminOrders.data?.orders?.some((o) => o.id === order1.data.order.id), 'Admin no ve orden creada.');
+  const pendingQuote = adminOrders.data?.orders?.find((o) => o.id === order1.data.order.id);
+  assert(pendingQuote && pendingQuote.pricingReady === false, 'La orden variable debería iniciar pendiente de cotización.');
+
+  const priced = await api(admin, `/admin/orders/${order1.data.order.id}/pricing`, {
+    method: 'PATCH',
+    body: { deliveryFeeCop: 8000, stainFeeCop: 15000 },
+  });
+  assert(
+    priced.data?.order?.pricingReady === true
+      && priced.data?.order?.deliveryFeeCents === 800000
+      && priced.data?.order?.stainFeeCents === 1500000,
+    'La cotización variable del administrador no se guardó correctamente.',
+  );
 
   await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [403], headers: { 'X-CSRF-Token': 'invalid-csrf-smoke' }, body: { status: 'PRE_WASH' } });
   await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [409], body: { status: 'PRE_WASH' } });
@@ -175,7 +204,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'admin-mfa', 'csrf', 'payment-gate', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'admin-mfa', 'csrf', 'variable-pricing', 'payment-gate', 'admin-workflow'] }));
 }
 
 main()
