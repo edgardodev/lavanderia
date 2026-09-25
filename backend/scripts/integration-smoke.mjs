@@ -142,12 +142,18 @@ async function main() {
   await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [403], headers: { 'X-CSRF-Token': 'invalid-csrf-smoke' }, body: { status: 'PRE_WASH' } });
   await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [409], body: { status: 'PRE_WASH' } });
 
+  const persistedOrder = await prisma.laundryOrder.findUnique({
+    where: { id: order1.data.order.id },
+    select: { amountCents: true },
+  });
+  assert(persistedOrder, 'No se encontró la orden creada para probar el pago.');
+
   const approvedPayment = await prisma.payment.create({
     data: {
       provider: 'WOMPI',
       externalReference: `CI-APPROVED-${unique}`,
       status: PaymentStatus.APPROVED,
-      amountCents: order1.data.order.amountCents,
+      amountCents: persistedOrder.amountCents,
       currency: 'COP',
       environment: 'sandbox',
       resourceType: 'order',
