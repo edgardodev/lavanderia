@@ -98,6 +98,12 @@ async function main() {
       && !holiday.data.slots.includes('07:00-09:00'),
     'Los festivos no están usando el horario de domingo.',
   );
+  const movedHoliday = await api(anon, '/calendar/day?date=2026-08-17');
+  assert(
+    movedHoliday.data?.isHoliday === true
+      && movedHoliday.data?.scheduleType === 'SUNDAY_HOLIDAY',
+    'Los festivos trasladados al lunes no están usando el horario de domingo.',
+  );
   await api(anon, '/admin/orders', { expected: [401] });
 
   const unique = `${Date.now().toString(36)}${randomBytes(4).toString('hex')}`;
@@ -138,6 +144,11 @@ async function main() {
   const order1 = await api(client, '/orders', { method: 'POST', expected: [201], headers: { 'Idempotency-Key': orderKey }, body: orderBody });
   const order2 = await api(client, '/orders', { method: 'POST', headers: { 'Idempotency-Key': orderKey }, body: orderBody });
   assert(order1.data?.order?.id === order2.data?.order?.id && order2.data?.idempotentReplay === true, 'Falló idempotencia de órdenes.');
+  await api(client, '/payments/wompi/checkout', {
+    method: 'POST',
+    expected: [409],
+    body: { type: 'order', id: order1.data.order.id },
+  });
 
   const admin = new CookieJar();
   const firstAdminLogin = await api(admin, '/auth/admin/login', { method: 'POST', expected: [428], body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
@@ -204,7 +215,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'admin-mfa', 'csrf', 'variable-pricing', 'payment-gate', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'csrf', 'variable-pricing', 'payment-gate', 'admin-workflow'] }));
 }
 
 main()
