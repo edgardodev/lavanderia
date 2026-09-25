@@ -146,6 +146,13 @@ Después entra desde:
 
 Selecciona **Usuario**. Desde el panel podrás probar autoservicio y **Lo hacemos por ti**.
 
+Reglas operativas actuales:
+
+- Domingos y festivos colombianos usan las mismas franjas de autoservicio: 09:00-11:00, 11:00-13:00, 13:00-15:00 y 15:00-17:00.
+- En “Lo hacemos por ti”, el domicilio y el desmanche/despercude son cargos variables. Si aplican, la orden queda pendiente de cotización.
+- La persona encargada de la sede carga esos valores desde el panel de órdenes. El cliente ve el desglose y el total antes de que se habilite el pago con Wompi.
+- Una orden asistida no puede avanzar al proceso de lavandería mientras el pago no esté aprobado.
+
 ## 6. Entrar como administrador por primera vez
 
 Abre directamente:
