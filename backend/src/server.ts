@@ -105,14 +105,22 @@ const upload = multer({
 });
 
 const port = Number(process.env.PORT ?? 4000);
-const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
 const isProduction = process.env.NODE_ENV === 'production';
+
+function normalizeOrigin(value: string) {
+  const url = new URL(value.trim());
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Origen web inválido.');
+  return url.origin;
+}
+
+const webOrigin = normalizeOrigin(process.env.WEB_ORIGIN ?? 'http://localhost:3000');
 const allowedOrigins = new Set([
   webOrigin,
   ...String(process.env.WEB_ORIGINS ?? '')
     .split(',')
     .map((value) => value.trim())
-    .filter(Boolean),
+    .filter(Boolean)
+    .map(normalizeOrigin),
   ...(isProduction
     ? []
     : [
