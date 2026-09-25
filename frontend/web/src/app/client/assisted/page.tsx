@@ -11,7 +11,7 @@ import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
 import { branchSeed, businessHours, cycleLabels, doneForYouPrices } from '@/lib/constants';
 import { registerPushNotifications } from '@/lib/fcm';
-import { formatDateTime } from '@/lib/format';
+import { formatCOP, formatDateTime } from '@/lib/format';
 import type { Branch, CycleType, LaundryOrder, PickupType } from '@/types';
 
 type AssistedDraft = {
@@ -92,6 +92,11 @@ export default function AssistedPage() {
   const selectedOrder = useMemo(
     () => orders.find((order) => order.id === selectedOrderId) ?? orders.find((order) => !['DELIVERED', 'CANCELLED'].includes(order.status)) ?? orders[0],
     [orders, selectedOrderId],
+  );
+
+  const createdOrder = useMemo(
+    () => orders.find((order) => order.id === createdId),
+    [createdId, orders],
   );
 
   function update<K extends keyof AssistedDraft>(key: K, value: AssistedDraft[K]) {
@@ -199,7 +204,12 @@ export default function AssistedPage() {
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={submitting}>{submitting ? 'Creando...' : 'Crear servicio'}</Button>
-              {createdId && <WompiCheckoutButton type="order" id={createdId} />}
+              {createdId && createdOrder?.pricingReady !== false && <WompiCheckoutButton type="order" id={createdId} />}
+              {createdId && createdOrder?.pricingReady === false && (
+                <p className="text-sm font-bold text-amber-700">
+                  La sede debe confirmar primero los valores variables solicitados. Cuando estén listos podrás pagar desde “Mis servicios asistidos”.
+                </p>
+              )}
             </div>
             {message && <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p>}
             {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</p>}
@@ -220,9 +230,11 @@ export default function AssistedPage() {
               </div>
             ) : selectedOrder ? (
               <p className="mt-6 rounded-3xl bg-amber-50 p-4 text-sm font-bold text-amber-800">
-                {selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING'
-                  ? 'El pago no está aprobado. El proceso de lavandería no comenzará hasta tener un pago aprobado.'
-                  : 'Tu solicitud está creada y pendiente de pago. El seguimiento de la ropa comenzará cuando el pago sea aprobado.'}
+                {selectedOrder.pricingReady === false
+                  ? 'La sede está confirmando los valores de domicilio y/o desmanche. El botón de pago se habilitará cuando el total esté definido.'
+                  : selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING'
+                    ? 'El pago no está aprobado. El proceso de lavandería no comenzará hasta tener un pago aprobado.'
+                    : 'Tu solicitud está creada y pendiente de pago. El seguimiento de la ropa comenzará cuando el pago sea aprobado.'}
               </p>
             ) : (
               <p className="mt-6 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Cuando crees tu primer servicio “Lo hacemos por ti”, aquí aparecerá su seguimiento.</p>
@@ -256,15 +268,50 @@ export default function AssistedPage() {
                     <StatusBadge status={selectedOrder.status} />
                   ) : (
                     <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">
-                      {selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING' ? 'Pago no aprobado' : 'Pendiente de pago'}
+                      {selectedOrder.pricingReady === false
+                        ? 'Pendiente de cotización'
+                        : selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING'
+                          ? 'Pago no aprobado'
+                          : 'Pendiente de pago'}
                     </span>
                   )}
                 </div>
-                {selectedOrder.paymentStatus !== 'APPROVED' && selectedOrder.status !== 'CANCELLED' && (
-                  <div className="rounded-3xl border border-yellowBrand/60 bg-yellowBrand/15 p-4">
-                    <p className="mb-3 text-sm font-black text-slate-900">Pago pendiente</p>
-                    <WompiCheckoutButton type="order" id={selectedOrder.id} />
+                <div className="rounded-3xl border border-slate-200 bg-white p-4 text-sm">
+                  <p className="font-black text-slate-950">Detalle del valor</p>
+                  <div className="mt-3 grid gap-2 text-slate-600">
+                    <div className="flex justify-between gap-3">
+                      <span>Servicio base</span>
+                      <strong>{formatCOP((selectedOrder.baseAmountCents ?? selectedOrder.amountCents ?? 0) / 100)}</strong>
+                    </div>
+                    {selectedOrder.pickupType === 'DELIVERY' && (
+                      <div className="flex justify-between gap-3">
+                        <span>Domicilio</span>
+                        <strong>{selectedOrder.deliveryFeeCents == null ? 'Pendiente' : formatCOP(selectedOrder.deliveryFeeCents / 100)}</strong>
+                      </div>
+                    )}
+                    {selectedOrder.stainService && (
+                      <div className="flex justify-between gap-3">
+                        <span>Desmanche/despercude</span>
+                        <strong>{selectedOrder.stainFeeCents == null ? 'Pendiente' : formatCOP(selectedOrder.stainFeeCents / 100)}</strong>
+                      </div>
+                    )}
+                    <div className="mt-1 flex justify-between gap-3 border-t border-slate-200 pt-2 text-slate-950">
+                      <span className="font-black">Total</span>
+                      <strong className="text-aqua">{formatCOP((selectedOrder.amountCents ?? 0) / 100)}</strong>
+                    </div>
                   </div>
+                </div>
+                {selectedOrder.paymentStatus !== 'APPROVED' && selectedOrder.status !== 'CANCELLED' && (
+                  selectedOrder.pricingReady === false ? (
+                    <div className="rounded-3xl border border-yellowBrand/60 bg-yellowBrand/15 p-4 text-sm font-bold text-slate-700">
+                      La persona encargada de la sede debe cargar los valores variables antes de habilitar el pago.
+                    </div>
+                  ) : (
+                    <div className="rounded-3xl border border-yellowBrand/60 bg-yellowBrand/15 p-4">
+                      <p className="mb-3 text-sm font-black text-slate-900">Pago pendiente</p>
+                      <WompiCheckoutButton type="order" id={selectedOrder.id} />
+                    </div>
+                  )
                 )}
                 <ClientOrderHistory order={selectedOrder} onChanged={() => void loadOrders()} />
               </div>
