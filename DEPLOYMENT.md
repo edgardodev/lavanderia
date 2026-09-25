@@ -131,6 +131,7 @@ No desplegar producción hasta que:
 - reserva simultánea/bloqueo de máquina se pruebe con dos sesiones;
 - evidencias privadas se prueben con usuario autorizado y no autorizado;
 - razón social, NIT, contactos y textos legales sean revisados por la empresa/asesor jurídico;
+- las tres direcciones reales de las sedes estén configuradas antes de ejecutar el seed de producción;
 - se realice prueba de carga del backend con el volumen esperado y margen de seguridad;
 - se pruebe restauración de backup.
 
