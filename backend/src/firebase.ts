@@ -113,7 +113,7 @@ export async function sendPush(tokens: string[], title: string, body: string, da
     data,
     webpush: {
       notification: { icon: '/logo.png' },
-      fcmOptions: { link: data.url || '/client/dashboard' },
+      fcmOptions: { link: data.url || '/client/assisted' },
     },
   }), 'El envío de notificaciones Firebase', 12_000);
 
