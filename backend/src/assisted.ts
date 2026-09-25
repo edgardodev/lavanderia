@@ -1,5 +1,5 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
-import { OrderStatus, PrismaClient, Role } from '@prisma/client';
+import { OrderStatus, PaymentStatus, PrismaClient, Role } from '@prisma/client';
 import {
   deleteEvidenceImage,
   firebaseReady,
@@ -307,9 +307,12 @@ export function registerAssistedRoutes(
 
       const existing = await prisma.laundryOrder.findUnique({
         where: { id: orderId },
-        include: { client: true },
+        include: { client: true, payment: { select: { status: true } } },
       });
       if (!existing) return res.status(404).json({ message: 'Orden no encontrada.' });
+      if (nextStatus !== OrderStatus.CANCELLED && existing.payment?.status !== PaymentStatus.APPROVED) {
+        return res.status(409).json({ message: 'No se puede iniciar o avanzar el servicio hasta que el pago esté aprobado.' });
+      }
       if (!canTransition(existing.status, nextStatus, existing.pickupType)) {
         return res.status(409).json({ message: `No se puede pasar de ${existing.status} a ${nextStatus}.` });
       }
@@ -340,7 +343,7 @@ export function registerAssistedRoutes(
         type: 'ORDER_STATUS',
         orderId,
         status: nextStatus,
-        url: '/client/dashboard',
+        url: '/client/assisted',
       });
       return res.json({ order: await orderDto(order, true), notificationSent: push.sent > 0 });
     } catch (error) {
@@ -373,7 +376,7 @@ export function registerAssistedRoutes(
       });
       if (!isInternal) {
         await notifyClient(prisma, order.clientId, 'Mensaje sobre tu servicio', message.slice(0, 180), {
-          type: 'ORDER_MESSAGE', orderId, url: '/client/dashboard',
+          type: 'ORDER_MESSAGE', orderId, url: '/client/assisted',
         });
       }
       return res.status(201).json({
@@ -487,7 +490,7 @@ export function registerAssistedRoutes(
       });
 
       await notifyClient(prisma, order.clientId, 'Nueva evidencia de tu servicio', description || 'Agregamos fotos de evidencia a tu orden.', {
-        type: 'ORDER_EVIDENCE', orderId, url: '/client/dashboard',
+        type: 'ORDER_EVIDENCE', orderId, url: '/client/assisted',
       });
       return res.status(201).json({ evidence: await Promise.all(records.map(evidenceDto)) });
     } catch (error: any) {
