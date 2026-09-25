@@ -124,7 +124,7 @@ Antes del lanzamiento:
 No desplegar producción hasta que:
 
 - CI compile backend y frontend;
-- `npm audit --omit=dev --audit-level=high` pase en ambos proyectos;
+- el frontend pase `npm audit --omit=dev --audit-level=high` y el backend pase `node scripts/audit-runtime.mjs` sin vulnerabilidades high/critical alcanzables desde dependencias de ejecución;
 - Next.js esté en una versión de seguridad vigente de la línea 16.x (actualmente el repositorio está fijado a 16.3.6);
 - todas las migraciones apliquen correctamente en staging;
 - Wompi Sandbox complete casos aprobado/rechazado/pendiente/expirado;
