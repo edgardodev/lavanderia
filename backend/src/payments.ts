@@ -242,6 +242,9 @@ export function registerWompiPaymentRoutes(
           deliveryFeeCents: number | null;
           stainFeeCents: number | null;
         };
+        if (order.status !== 'QUEUED') {
+          return res.status(409).json({ message: 'Esta orden ya no está disponible para iniciar un nuevo pago.' });
+        }
         const pendingLabels = [
           ...(order.pickupType === 'DELIVERY' && order.deliveryFeeCents === null ? ['domicilio'] : []),
           ...(order.stainService && order.stainFeeCents === null ? ['desmanche/despercude'] : []),
@@ -312,7 +315,9 @@ export function registerWompiPaymentRoutes(
               where: {
                 id,
                 clientId: user.id,
+                status: 'QUEUED',
                 paymentId: resource.paymentId ?? null,
+                amountCents: resource.amountCents,
               },
               data: { paymentId: created.id },
             });
