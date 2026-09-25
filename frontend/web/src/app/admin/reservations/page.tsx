@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { Card, Field, Input, Select } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
-import { branchSeed, cycleLabels } from '@/lib/constants';
+import { bogotaToday, branchSeed, cycleLabels } from '@/lib/constants';
 import { formatDateTime } from '@/lib/format';
 import type { Branch, Reservation } from '@/types';
 
@@ -27,7 +27,7 @@ function machineName(branches: Branch[], machineId: string) {
 export default function AdminReservationsPage() {
   const [branches, setBranches] = useState<Branch[]>(branchSeed);
   const [branchFilter, setBranchFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFilter, setDateFilter] = useState(bogotaToday());
   const [machineFilter, setMachineFilter] = useState('all');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [notifications, setNotifications] = useState<ReservationNotification[]>([]);
