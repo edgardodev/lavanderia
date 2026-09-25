@@ -5,7 +5,7 @@ Esta aplicación debe pasar primero por un ambiente de **staging** con la misma 
 ## 1. Runtime
 
 - Node.js 22 LTS.
-- MySQL con backups automáticos y restauración probada.
+- MySQL con backups automáticos y restauración probada. Use un usuario dedicado de aplicación con contraseña fuerte; no ejecute la app con `root`. Cuando la base sea remota, use la conexión privada o TLS exigido por el proveedor.
 - Frontend y backend bajo HTTPS.
 - Preferir frontend y API bajo el mismo host (por ejemplo, `https://app.tu-dominio.com` y `/api` mediante proxy). Si se usan subdominios distintos, configure `COOKIE_DOMAIN=.tu-dominio.com` únicamente cuando todos esos subdominios sean de confianza; así el middleware del frontend puede ver la sesión. No use un dominio compartido con subdominios no confiables.
 - Backend detrás de un proxy/load balancer que respete `X-Forwarded-*`.
@@ -66,6 +66,8 @@ Nunca guarde en GitHub:
 - contraseña bootstrap del administrador.
 
 Después de crear el administrador bootstrap, cambiar la contraseña y activar MFA, retire `ADMIN_BOOTSTRAP_PASSWORD` del entorno cuando el proveedor lo permita.
+
+Conserve `MFA_ENCRYPTION_KEY` en el gestor de secretos y en el procedimiento seguro de recuperación: cambiarla sin una migración/re-encriptado deja ilegibles los secretos TOTP y los hashes de recuperación existentes.
 
 ## 4. Wompi
 
