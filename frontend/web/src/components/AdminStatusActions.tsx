@@ -20,11 +20,13 @@ export function AdminStatusActions({
   orderId,
   currentStatus,
   pickupType,
+  canAdvance = true,
   onUpdated,
 }: {
   orderId: string;
   currentStatus?: OrderStatus;
   pickupType?: 'STORE' | 'DELIVERY';
+  canAdvance?: boolean;
   onUpdated?: (status?: OrderStatus) => void;
 }) {
   const [loadingStatus, setLoadingStatus] = useState<OrderStatus | null>(null);
@@ -62,7 +64,7 @@ export function AdminStatusActions({
               key={status}
               type="button"
               onClick={() => void update(status)}
-              disabled={Boolean(loadingStatus) || active}
+              disabled={Boolean(loadingStatus) || active || !canAdvance}
               className={`rounded-full border px-3 py-2 text-xs font-black transition disabled:cursor-not-allowed ${
                 active
                   ? 'border-aqua bg-aqua text-white'
@@ -74,6 +76,9 @@ export function AdminStatusActions({
           );
         })}
       </div>
+      {!canAdvance && (
+        <p className="text-xs font-bold text-amber-700">El pago debe estar aprobado antes de iniciar o avanzar el proceso.</p>
+      )}
       {message && <p className="text-xs font-bold text-emerald-700">{message}</p>}
       {error && <p className="text-xs font-bold text-rose-700">{error}</p>}
     </div>
