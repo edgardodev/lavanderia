@@ -1,4 +1,4 @@
-import { cycleLabels, doneForYouPrices, selfServicePrices, stainServiceRange } from '@/lib/constants';
+import { cycleLabels, doneForYouPrices, selfServicePrices } from '@/lib/constants';
 import { formatCOP } from '@/lib/format';
 import type { CycleType } from '@/types';
 
@@ -20,10 +20,14 @@ export function PriceSummary({ mode, cycleType, includeStainService = false }: {
         <p>Ciclo de 0 a 8 kilos, aprox. 30 a 35 prendas de uso diario.</p>
         {includeStainService && (
           <p className="font-bold text-slate-900">
-            Desmanche/despercude: {formatCOP(stainServiceRange.min)} a {formatCOP(stainServiceRange.max)} por prenda. Entrega de 2 a 3 días.
+            Desmanche/despercude: valor variable según las prendas y su condición. La sede confirmará el total antes del pago.
           </p>
         )}
-        <p className="text-xs font-bold text-slate-500">Las tarifas no incluyen domicilio.</p>
+        {mode === 'ASSISTED' && (
+          <p className="text-xs font-bold text-slate-500">
+            El domicilio también es variable cuando aplica. La persona encargada de la sede carga estos valores antes de habilitar el pago.
+          </p>
+        )}
       </div>
     </aside>
   );
