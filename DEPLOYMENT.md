@@ -7,6 +7,7 @@ Esta aplicación debe pasar primero por un ambiente de **staging** con la misma 
 - Node.js 22 LTS.
 - MySQL con backups automáticos y restauración probada.
 - Frontend y backend bajo HTTPS.
+- Preferir frontend y API bajo el mismo host (por ejemplo, `https://app.tu-dominio.com` y `/api` mediante proxy). Si se usan subdominios distintos, configure `COOKIE_DOMAIN=.tu-dominio.com` únicamente cuando todos esos subdominios sean de confianza; así el middleware del frontend puede ver la sesión. No use un dominio compartido con subdominios no confiables.
 - Backend detrás de un proxy/load balancer que respete `X-Forwarded-*`.
 - Liveness: `GET /api/health`.
 - Readiness: `GET /api/ready` (comprueba MySQL y devuelve 503 si la instancia no está lista).
