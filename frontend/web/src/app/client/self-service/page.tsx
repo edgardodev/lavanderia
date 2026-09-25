@@ -12,6 +12,7 @@ import {
   cycleLabels,
   getTimeSlotsForDate,
   selfServicePrices,
+  timeSlotOptions,
 } from "@/lib/constants";
 import type { Branch, CycleType, Reservation } from "@/types";
 
@@ -28,6 +29,15 @@ type Availability = {
   reservedMachineIds: string[];
   blockedMachineIds: string[];
   unavailableMachineIds: string[];
+};
+
+type DaySchedule = {
+  date: string;
+  isSunday: boolean;
+  isHoliday: boolean;
+  holidayName?: string | null;
+  scheduleType: 'WEEKDAY' | 'SUNDAY_HOLIDAY';
+  slots: string[];
 };
 
 const today = new Date().toISOString().slice(0, 10);
@@ -49,6 +59,8 @@ export default function SelfServicePage() {
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
+  const [slots, setSlots] = useState(() => getTimeSlotsForDate(today));
+  const [dayScheduleNote, setDayScheduleNote] = useState('');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
@@ -72,7 +84,30 @@ export default function SelfServicePage() {
   }, []);
 
   const selected = branches.find((branch) => branch.id === draft.branchId) ?? branches[0];
-  const slots = useMemo(() => getTimeSlotsForDate(draft.date), [draft.date]);
+
+  useEffect(() => {
+    if (!draft.date) {
+      setSlots([]);
+      setDayScheduleNote('');
+      return;
+    }
+    apiFetch<DaySchedule>(`/calendar/day?date=${encodeURIComponent(draft.date)}`)
+      .then((data) => {
+        setSlots(timeSlotOptions(data.slots));
+        setDayScheduleNote(
+          data.isHoliday
+            ? `Festivo${data.holidayName ? ` · ${data.holidayName}` : ''}: horario de domingo.`
+            : data.isSunday
+              ? 'Domingo: horario especial.'
+              : '',
+        );
+      })
+      .catch((err) => {
+        setSlots(getTimeSlotsForDate(draft.date));
+        setDayScheduleNote('');
+        setError(err instanceof Error ? err.message : 'No se pudo consultar el horario del día.');
+      });
+  }, [draft.date]);
 
   const loadReservations = useCallback(async () => {
     try {
@@ -224,7 +259,7 @@ export default function SelfServicePage() {
               <Field label="Día de reserva" hint="Domingos y festivos manejan horario especial.">
                 <Input type="date" value={draft.date} onChange={(event) => update("date", event.target.value)} min={today} required />
               </Field>
-              <Field label="Franja horaria">
+              <Field label="Franja horaria" hint={dayScheduleNote || undefined}>
                 <Select value={draft.slot} onChange={(event) => update("slot", event.target.value)} required>
                   <option value="">Selecciona franja</option>
                   {slots.map((slot) => <option key={slot.value} value={slot.value}>{slot.label}</option>)}
