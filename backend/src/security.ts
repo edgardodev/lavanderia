@@ -106,8 +106,26 @@ export function assertProductionSecrets() {
   }
 
   const webOrigin = requireProductionValue('WEB_ORIGIN');
-  if (!webOrigin.startsWith('https://')) {
-    throw new Error('WEB_ORIGIN debe usar HTTPS en producción.');
+  let webOriginUrl: URL;
+  try {
+    webOriginUrl = new URL(webOrigin);
+  } catch {
+    throw new Error('WEB_ORIGIN debe ser una URL válida.');
+  }
+  if (webOriginUrl.protocol !== 'https:' || webOriginUrl.origin !== webOrigin.replace(/\/$/, '')) {
+    throw new Error('WEB_ORIGIN debe ser un origen HTTPS sin ruta, query ni fragmento.');
+  }
+
+  for (const extraOrigin of String(process.env.WEB_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
+    let extraUrl: URL;
+    try {
+      extraUrl = new URL(extraOrigin);
+    } catch {
+      throw new Error('WEB_ORIGINS contiene una URL inválida.');
+    }
+    if (extraUrl.protocol !== 'https:' || extraUrl.origin !== extraOrigin.replace(/\/$/, '')) {
+      throw new Error('Cada valor de WEB_ORIGINS debe ser un origen HTTPS sin ruta, query ni fragmento.');
+    }
   }
 
   const mfaKey = Buffer.from(requireProductionValue('MFA_ENCRYPTION_KEY'), 'base64');
