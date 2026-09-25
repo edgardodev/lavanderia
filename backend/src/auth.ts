@@ -65,6 +65,11 @@ function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+function cookieDomain() {
+  const value = String(process.env.COOKIE_DOMAIN ?? '').trim();
+  return value || undefined;
+}
+
 function authCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
@@ -72,6 +77,7 @@ function authCookieOptions(maxAge: number) {
     secure: isProduction(),
     maxAge,
     path: '/',
+    ...(cookieDomain() ? { domain: cookieDomain() } : {}),
   };
 }
 
@@ -82,6 +88,7 @@ function csrfCookieOptions(maxAge: number) {
     secure: isProduction(),
     maxAge,
     path: '/',
+    ...(cookieDomain() ? { domain: cookieDomain() } : {}),
   };
 }
 
