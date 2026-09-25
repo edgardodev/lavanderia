@@ -160,7 +160,7 @@ export function assertProductionSecrets() {
   if (!publicKey.startsWith('pub_prod_') || !privateKey.startsWith('prv_prod_')) {
     throw new Error('Las llaves Wompi de producción deben usar prefijos pub_prod_ y prv_prod_.');
   }
-  if (!integritySecret.startsWith('prod_') || !eventsSecret.startsWith('prod_')) {
+  if (!integritySecret.startsWith('prod_integrity_') || !eventsSecret.startsWith('prod_events_')) {
     throw new Error('Los secretos Wompi de producción deben corresponder al ambiente de producción.');
   }
   if (!redirectUrl.startsWith('https://')) {
