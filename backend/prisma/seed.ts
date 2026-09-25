@@ -76,13 +76,34 @@ async function bootstrapAdministrator() {
   return true;
 }
 
+function branchAddress(envName: string, developmentFallback: string) {
+  const value = String(process.env[envName] ?? '').trim();
+  if (value) return value;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(`${envName} es obligatorio para sembrar sedes en producción.`);
+  }
+  return developmentFallback;
+}
+
 async function main() {
   const bootstrapCreated = await bootstrapAdministrator();
 
   const branches = [
-    { id: 'universidad-metropolitana', name: 'Universidad Metropolitana', address: 'Sede Universidad Metropolitana' },
-    { id: 'cra-46', name: 'Cra 46 con 93', address: 'Sede Cra 46 con 93' },
-    { id: 'villa-carolina', name: 'Villa Carolina', address: 'Sede Villa Carolina' },
+    {
+      id: 'universidad-metropolitana',
+      name: 'Universidad Metropolitana',
+      address: branchAddress('BRANCH_UNIVERSIDAD_METROPOLITANA_ADDRESS', 'Sede Universidad Metropolitana'),
+    },
+    {
+      id: 'cra-46',
+      name: 'Cra 46 con 93',
+      address: branchAddress('BRANCH_CRA_46_ADDRESS', 'Sede Cra 46 con 93'),
+    },
+    {
+      id: 'villa-carolina',
+      name: 'Villa Carolina',
+      address: branchAddress('BRANCH_VILLA_CAROLINA_ADDRESS', 'Sede Villa Carolina'),
+    },
   ];
 
   for (const branch of branches) {
