@@ -1,9 +1,11 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { PaymentStatus, PrismaClient } from '@prisma/client';
 
 const API_URL = String(process.env.TEST_API_URL ?? 'http://127.0.0.1:4000/api').replace(/\/$/, '');
 const ORIGIN = process.env.TEST_WEB_ORIGIN ?? 'http://localhost:3000';
 const ADMIN_EMAIL = String(process.env.ADMIN_BOOTSTRAP_EMAIL ?? '').trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_BOOTSTRAP_PASSWORD ?? '');
+const prisma = new PrismaClient();
 
 class CookieJar {
   cookies = new Map();
@@ -138,8 +140,28 @@ async function main() {
   assert(adminOrders.data?.orders?.some((o) => o.id === order1.data.order.id), 'Admin no ve orden creada.');
 
   await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [403], headers: { 'X-CSRF-Token': 'invalid-csrf-smoke' }, body: { status: 'PRE_WASH' } });
+  await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [409], body: { status: 'PRE_WASH' } });
+
+  const approvedPayment = await prisma.payment.create({
+    data: {
+      provider: 'WOMPI',
+      externalReference: `CI-APPROVED-${unique}`,
+      status: PaymentStatus.APPROVED,
+      amountCents: order1.data.order.amountCents,
+      currency: 'COP',
+      environment: 'sandbox',
+      resourceType: 'order',
+      resourceId: order1.data.order.id,
+      processedAt: new Date(),
+    },
+  });
+  await prisma.laundryOrder.update({
+    where: { id: order1.data.order.id },
+    data: { paymentId: approvedPayment.id },
+  });
+
   const advanced = await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', body: { status: 'PRE_WASH' } });
-  assert(advanced.data?.order?.status === 'PRE_WASH', 'Admin no pudo avanzar orden.');
+  assert(advanced.data?.order?.status === 'PRE_WASH', 'Admin no pudo avanzar orden pagada.');
   await api(admin, `/admin/orders/${order1.data.order.id}/messages`, { method: 'POST', expected: [201], body: { message: 'Mensaje smoke visible al cliente.', isInternal: false } });
 
   const clientOrders = await api(client, '/client/orders');
@@ -147,10 +169,14 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'admin-mfa', 'csrf', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'admin-mfa', 'csrf', 'payment-gate', 'admin-workflow'] }));
 }
 
-main().catch((error) => {
-  console.error('Integration smoke FAILED:', error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+main()
+  .catch((error) => {
+    console.error('Integration smoke FAILED:', error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
