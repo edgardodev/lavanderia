@@ -373,13 +373,28 @@ export function registerAssistedRoutes(
           throw new Error('Hay un checkout de Wompi activo. No se modificó el valor.');
         }
 
+        if (
+          current.paymentId
+          && current.payment?.status === PaymentStatus.PENDING
+          && (!current.payment.expiresAt || current.payment.expiresAt <= new Date())
+        ) {
+          await tx.payment.update({
+            where: { id: current.paymentId },
+            data: {
+              status: PaymentStatus.ERROR,
+              processedAt: new Date(),
+              rawResponse: { reason: 'ADMIN_PRICING_UPDATED_AFTER_CHECKOUT_EXPIRY' },
+            },
+          });
+        }
+
         const order = await tx.laundryOrder.update({
           where: { id: orderId },
           data: {
             deliveryFeeCents,
             stainFeeCents,
             amountCents,
-            paymentId: current.payment?.status === PaymentStatus.PENDING ? current.paymentId : null,
+            paymentId: null,
           },
           include: orderInclude,
         });
