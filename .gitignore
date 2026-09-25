@@ -1,6 +1,20 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/web/.env
+frontend/web/.env.*
+!frontend/web/.env.example
+*firebase-adminsdk*.json
+*service-account*.json
+*.pem
+*.key
+
 # Backend
 backend/node_modules/
-backend/.env
 backend/dist/
 
 # Frontend (Next.js)
