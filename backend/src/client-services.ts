@@ -10,6 +10,7 @@ import {
   ServiceMode,
 } from '@prisma/client';
 import type { AuthenticatedUser } from './auth.js';
+import { businessDaySchedule } from './business-calendar.js';
 
 type RequireUser = (
   req: Request,
@@ -27,11 +28,6 @@ const doneForYouPrices: Record<CycleType, number> = {
   WASH: 22000,
   DRY: 22000,
   FULL: 44000,
-};
-
-const allowedSlotByDay = {
-  weekday: new Set(['07:00-09:00', '09:00-11:00', '11:00-13:00', '13:00-15:00', '15:00-17:00', '17:00-19:00']),
-  sunday: new Set(['09:00-11:00', '11:00-13:00', '13:00-15:00', '15:00-17:00']),
 };
 
 function toWompiCents(amountInCop: number) {
@@ -55,9 +51,7 @@ function parseSlot(date: string, slot: string) {
   };
 }
 
-function validateReservationSlot(date: string, slot: string) {
-  const selectedDate = new Date(`${date}T12:00:00-05:00`);
-  if (Number.isNaN(selectedDate.getTime())) throw new Error('Fecha inválida.');
+async function validateReservationSlot(prisma: PrismaClient, date: string, slot: string) {
   const todayBogota = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
     year: 'numeric',
@@ -66,9 +60,12 @@ function validateReservationSlot(date: string, slot: string) {
   }).format(new Date());
   if (date < todayBogota) throw new Error('No puedes reservar fechas pasadas.');
 
-  const day = selectedDate.getUTCDay();
-  const allowed = day === 0 ? allowedSlotByDay.sunday : allowedSlotByDay.weekday;
-  if (!allowed.has(slot)) throw new Error('La franja horaria no está disponible para ese día.');
+  const schedule = await businessDaySchedule(prisma, date);
+  if (!schedule.slots.includes(slot as never)) {
+    throw new Error(schedule.scheduleType === 'SUNDAY_HOLIDAY'
+      ? 'En domingos y festivos solo están disponibles las franjas de 9:00 a.m. a 5:00 p.m.'
+      : 'La franja horaria no está disponible para ese día.');
+  }
 
   const range = parseSlot(date, slot);
   if (range.scheduledStart >= range.scheduledEnd) throw new Error('La franja horaria es inválida.');
@@ -122,6 +119,13 @@ function orderDto(order: any) {
     stainService: Boolean(order.stainService),
     notes: order.notes ?? undefined,
     status: order.status,
+    baseAmountCents: order.baseAmountCents,
+    deliveryFeeCents: order.deliveryFeeCents ?? null,
+    stainFeeCents: order.stainFeeCents ?? null,
+    amountCents: order.amountCents,
+    pricingReady:
+      (order.pickupType !== 'DELIVERY' || order.deliveryFeeCents !== null)
+      && (!order.stainService || order.stainFeeCents !== null),
     createdAt: order.createdAt.toISOString(),
   };
 }
@@ -159,7 +163,7 @@ export function registerIdempotentClientServiceRoutes(
       }
       if (!Object.values(CycleType).includes(cycleType)) return res.status(400).json({ message: 'Tipo de ciclo inválido.' });
 
-      const { scheduledStart, scheduledEnd } = validateReservationSlot(date, slot);
+      const { scheduledStart, scheduledEnd } = await validateReservationSlot(prisma, date, slot);
       const reservation = await prisma.$transaction(async (tx) => {
         const machine = await tx.machine.findFirst({
           where: { id: machineId, branchId, isActive: true, branch: { isActive: true } },
@@ -260,6 +264,7 @@ export function registerIdempotentClientServiceRoutes(
       const branch = await prisma.branch.findFirst({ where: { id: branchId, isActive: true }, select: { id: true } });
       if (!branch) return res.status(404).json({ message: 'Sede no disponible.' });
 
+      const baseAmountCents = toWompiCents(doneForYouPrices[cycleType]);
       const order = await prisma.laundryOrder.create({
         data: {
           requestKey: key,
@@ -268,7 +273,8 @@ export function registerIdempotentClientServiceRoutes(
           serviceMode: ServiceMode.DONE_FOR_YOU,
           cycleType,
           status: OrderStatus.QUEUED,
-          amountCents: toWompiCents(doneForYouPrices[cycleType]),
+          baseAmountCents,
+          amountCents: baseAmountCents,
           pickupType,
           address,
           pieces: pieces || undefined,
