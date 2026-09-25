@@ -276,6 +276,7 @@ function reservationDto(reservation: any) {
     branchName: reservation.branch?.name,
     cycleType: reservation.cycleType,
     status: reservation.status,
+    paymentStatus: reservation.payment?.status ?? null,
     date: formatBogotaDate(reservation.scheduledStart),
     slot: slotFromRange(reservation),
     notes: reservation.notes ?? undefined,
@@ -406,7 +407,7 @@ app.get('/api/admin/reservations', async (req, res, next) => {
         ...(machineId !== 'all' ? { machineId } : {}),
         ...(date ? { scheduledStart: { gte: startOfDay, lte: endOfDay } } : {}),
       },
-      include: { client: true, branch: true, machine: true },
+      include: { client: true, branch: true, machine: true, payment: { select: { status: true } } },
       orderBy: [{ scheduledStart: 'asc' }, { createdAt: 'desc' }],
       take: 200,
     });
