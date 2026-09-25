@@ -225,7 +225,6 @@ export function registerWompiPaymentRoutes(
       const user = await requireUser(req, res, Role.CLIENT);
       if (!user) return;
 
-      const config = getWompiConfig();
       await releaseExpiredWompiCheckouts(prisma);
 
       const type = String(req.body?.type ?? '') as ResourceType;
@@ -293,6 +292,7 @@ export function registerWompiPaymentRoutes(
         return res.json({ checkout: buildCheckout(activePayment, user) });
       }
 
+      const config = getWompiConfig();
       const expiresAt = new Date(Date.now() + config.checkoutTtlMinutes * 60_000);
       const reference = paymentReference(type, id);
       const payment = await prisma.$transaction(async (tx) => {
