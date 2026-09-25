@@ -8,13 +8,22 @@ import { BranchTabs } from '@/components/BranchTabs';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
-import { branchSeed, getTimeSlotsForDate, statusLabels } from '@/lib/constants';
+import { branchSeed, getTimeSlotsForDate, statusLabels, timeSlotOptions } from '@/lib/constants';
 import type { BlockedSlot, Branch, LaundryOrder, OrderStatus, Reservation } from '@/types';
 
 type Availability = {
   reservedMachineIds: string[];
   blockedMachineIds: string[];
   unavailableMachineIds: string[];
+};
+
+type DaySchedule = {
+  date: string;
+  isSunday: boolean;
+  isHoliday: boolean;
+  holidayName?: string | null;
+  scheduleType: 'WEEKDAY' | 'SUNDAY_HOLIDAY';
+  slots: string[];
 };
 
 type MachineCell =
@@ -38,6 +47,10 @@ export default function AdminDashboardPage() {
   const [blockedMachineIds, setBlockedMachineIds] = useState<string[]>([]);
   const [unavailableMachineIds, setUnavailableMachineIds] = useState<string[]>([]);
   const [machineBoardDate, setMachineBoardDate] = useState(new Date().toISOString().slice(0, 10));
+  const [slots, setSlots] = useState(() => getTimeSlotsForDate(new Date().toISOString().slice(0, 10)));
+  const [boardSlots, setBoardSlots] = useState(() => getTimeSlotsForDate(new Date().toISOString().slice(0, 10)));
+  const [blockScheduleNote, setBlockScheduleNote] = useState('');
+  const [boardScheduleNote, setBoardScheduleNote] = useState('');
   const [blockForm, setBlockForm] = useState({
     branchId: branchSeed[0]?.id ?? '',
     machineId: '',
@@ -130,8 +143,55 @@ export default function AdminDashboardPage() {
     [blockedSlots, branchFilter],
   );
   const selectedBranch = branches.find((branch) => branch.id === blockForm.branchId) ?? branches[0];
-  const slots = getTimeSlotsForDate(blockForm.date);
-  const boardSlots = useMemo(() => getTimeSlotsForDate(machineBoardDate), [machineBoardDate]);
+
+  useEffect(() => {
+    if (!blockForm.date) {
+      setSlots([]);
+      setBlockScheduleNote('');
+      return;
+    }
+    apiFetch<DaySchedule>(`/calendar/day?date=${encodeURIComponent(blockForm.date)}`)
+      .then((data) => {
+        setSlots(timeSlotOptions(data.slots));
+        setBlockScheduleNote(
+          data.isHoliday
+            ? `Festivo${data.holidayName ? ` · ${data.holidayName}` : ''}: horario de domingo.`
+            : data.isSunday
+              ? 'Domingo: horario especial.'
+              : '',
+        );
+      })
+      .catch((error) => {
+        setSlots(getTimeSlotsForDate(blockForm.date));
+        setBlockScheduleNote('');
+        recordLoadError(error);
+      });
+  }, [blockForm.date, recordLoadError]);
+
+  useEffect(() => {
+    if (!machineBoardDate) {
+      setBoardSlots([]);
+      setBoardScheduleNote('');
+      return;
+    }
+    apiFetch<DaySchedule>(`/calendar/day?date=${encodeURIComponent(machineBoardDate)}`)
+      .then((data) => {
+        setBoardSlots(timeSlotOptions(data.slots));
+        setBoardScheduleNote(
+          data.isHoliday
+            ? `Festivo${data.holidayName ? ` · ${data.holidayName}` : ''}: horario de domingo.`
+            : data.isSunday
+              ? 'Domingo: horario especial.'
+              : '',
+        );
+      })
+      .catch((error) => {
+        setBoardSlots(getTimeSlotsForDate(machineBoardDate));
+        setBoardScheduleNote('');
+        recordLoadError(error);
+      });
+  }, [machineBoardDate, recordLoadError]);
+
   const boardGridStyle = useMemo(
     () => ({ gridTemplateColumns: `130px repeat(${Math.max(boardSlots.length, 1)}, minmax(110px, 1fr))` }),
     [boardSlots.length],
@@ -336,7 +396,7 @@ export default function AdminDashboardPage() {
                 <span className="rounded-full bg-yellowBrand px-3 py-1.5 text-slate-950">Bloqueada por sede</span>
               </div>
             </div>
-            <Field label="Día a visualizar">
+            <Field label="Día a visualizar" hint={boardScheduleNote || undefined}>
               <Input type="date" value={machineBoardDate} onChange={(event) => setMachineBoardDate(event.target.value)} />
             </Field>
           </div>
@@ -460,7 +520,7 @@ export default function AdminDashboardPage() {
                 <Field label="Día">
                   <Input type="date" value={blockForm.date} onChange={(event) => updateBlockForm('date', event.target.value)} min={new Date().toISOString().slice(0, 10)} />
                 </Field>
-                <Field label="Franja">
+                <Field label="Franja" hint={blockScheduleNote || undefined}>
                   <Select value={blockForm.slot} onChange={(event) => updateBlockForm('slot', event.target.value)} required>
                     <option value="">Selecciona franja</option>
                     {slots.map((slot) => <option key={slot.value} value={slot.value}>{slot.label}</option>)}
