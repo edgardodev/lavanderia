@@ -131,6 +131,8 @@ No desplegar producción hasta que:
 - Firebase Storage/FCM se pruebe con credenciales reales;
 - MFA admin se pruebe, incluyendo recovery code y bloqueo por intentos;
 - reserva simultánea/bloqueo de máquina se pruebe con dos sesiones;
+- al menos un domingo, un festivo fijo y un festivo trasladado al lunes se prueben con el horario especial;
+- una orden con domicilio/desmanche permanezca sin pago hasta que la sede cargue los cargos variables y el total mostrado coincida con el valor enviado a Wompi;
 - evidencias privadas se prueben con usuario autorizado y no autorizado;
 - razón social, NIT, contactos y textos legales sean revisados por la empresa/asesor jurídico;
 - las tres direcciones reales de las sedes estén configuradas antes de ejecutar el seed de producción;
