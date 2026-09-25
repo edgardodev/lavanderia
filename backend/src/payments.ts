@@ -190,6 +190,15 @@ function transactionMatchesPayment(transaction: Record<string, unknown>, payment
     && String(transaction.currency ?? '') === payment.currency;
 }
 
+function isLocallyExpiredPayment(payment: { status: PaymentStatus; rawResponse: unknown }) {
+  if (payment.status !== PaymentStatus.ERROR || !payment.rawResponse || typeof payment.rawResponse !== 'object') {
+    return false;
+  }
+  const reason = String((payment.rawResponse as { reason?: unknown }).reason ?? '');
+  return reason === 'CHECKOUT_EXPIRED_WITHOUT_TRANSACTION'
+    || reason === 'ADMIN_PRICING_UPDATED_AFTER_CHECKOUT_EXPIRY';
+}
+
 function summarizeWompiEvent(body: any, transaction: Record<string, unknown>) {
   return {
     event: String(body?.event ?? ''),
@@ -408,7 +417,8 @@ export function registerWompiPaymentRoutes(
         return res.status(409).json({ message: 'El evento no coincide con el pago registrado.' });
       }
 
-      if (FINAL_PAYMENT_STATUSES.has(payment.status)) {
+      const lateApprovalAfterLocalExpiry = status === PaymentStatus.APPROVED && isLocallyExpiredPayment(payment);
+      if (FINAL_PAYMENT_STATUSES.has(payment.status) && !lateApprovalAfterLocalExpiry) {
         if (payment.status !== status) {
           await prisma.auditLog.create({
             data: {
@@ -491,6 +501,8 @@ export function registerWompiPaymentRoutes(
             if (isFailedPaymentStatus(status)) {
               await tx.laundryOrder.update({ where: { id: order.id }, data: { paymentId: null } });
             }
+          } else if (status === PaymentStatus.APPROVED) {
+            requiresManualReview = true;
           }
         }
 
