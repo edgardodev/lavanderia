@@ -50,7 +50,9 @@ Las transacciones interactivas tienen `maxWait=2 s` y `timeout=10 s`; si el pool
 
 ## 3. Variables obligatorias
 
-Use `backend/.env.example` como inventario. En producción el servidor se niega a iniciar si faltan secretos o datos legales críticos.
+Use `backend/.env.example` y `frontend/web/.env.example` como inventario. En producción el backend se niega a iniciar si faltan secretos o datos legales críticos.
+
+El frontend también debe compilarse con los valores públicos reales `NEXT_PUBLIC_LEGAL_*`, `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL`, `NEXT_PUBLIC_CUSTOMER_SERVICE_EMAIL` y la configuración pública de Firebase. No copie secretos del backend a variables `NEXT_PUBLIC_*`.
 
 Nunca guarde en GitHub:
 
@@ -69,8 +71,11 @@ Después de crear el administrador bootstrap, cambiar la contraseña y activar M
 Primero pruebe Sandbox de extremo a extremo: pago aprobado, rechazado, PSE pendiente, abandono, expiración y webhook. Solo entonces cambie a llaves `prod_*`.
 
 - El webhook público debe ser `/api/payments/wompi/webhook`.
+- El redirect de checkout debe apuntar a `/client/payment-return`; esa pantalla es informativa y nunca se toma como confirmación de pago.
 - Wompi tiene timeout de red interno (`WOMPI_HTTP_TIMEOUT_MS`, 8 s por defecto).
 - El backend nunca confía únicamente en el redirect del navegador.
+- Los estados finales de pago no se regresan a `PENDING` por eventos tardíos. Si llega un pago aprobado cuando una reserva ya perdió su bloqueo, se conserva el pago para conciliación y se registra `WOMPI_LATE_PAYMENT_EVENT` con revisión manual en vez de reactivar una reserva sin cupo.
+- Una orden “Lo hacemos por ti” no puede iniciar ni avanzar etapas operativas hasta que el pago asociado esté `APPROVED`.
 
 ## 5. Firebase
 
@@ -95,7 +100,7 @@ Configure el proveedor para alertar como mínimo por:
 - latencia p95/p99;
 - uso de memoria/CPU;
 - conexiones MySQL y pool agotado;
-- fallos de webhook Wompi;
+- fallos de webhook Wompi y eventos `WOMPI_LATE_PAYMENT_EVENT` que requieran conciliación;
 - fallos de Firebase/FCM;
 - reinicios del proceso.
 
@@ -117,6 +122,7 @@ No desplegar producción hasta que:
 
 - CI compile backend y frontend;
 - `npm audit --omit=dev --audit-level=high` pase en ambos proyectos;
+- Next.js esté en una versión de seguridad vigente de la línea 16.x (actualmente el repositorio está fijado a 16.3.6);
 - todas las migraciones apliquen correctamente en staging;
 - Wompi Sandbox complete casos aprobado/rechazado/pendiente/expirado;
 - Firebase Storage/FCM se pruebe con credenciales reales;
