@@ -44,7 +44,10 @@ export function getWompiConfig(): WompiConfig {
   const eventsSecret = required('WOMPI_EVENTS_SECRET');
   const currency = 'COP' as const;
   const redirectUrl = required('WOMPI_REDIRECT_URL');
-  const checkoutTtlMinutes = Math.min(60, Math.max(5, Number(process.env.WOMPI_CHECKOUT_TTL_MINUTES ?? 15)));
+  const rawCheckoutTtl = Number(process.env.WOMPI_CHECKOUT_TTL_MINUTES ?? 15);
+  const checkoutTtlMinutes = Number.isFinite(rawCheckoutTtl)
+    ? Math.min(60, Math.max(5, Math.trunc(rawCheckoutTtl)))
+    : 15;
 
   const production = environment === 'production';
   assertPrefix(publicKey, production ? 'pub_prod_' : 'pub_test_', 'WOMPI_PUBLIC_KEY');
