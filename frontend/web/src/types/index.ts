@@ -53,7 +53,12 @@ export interface LaundryOrder {
   stainService?: boolean;
   notes?: string;
   status: OrderStatus;
+  baseAmountCents?: number;
+  deliveryFeeCents?: number | null;
+  stainFeeCents?: number | null;
   amountCents?: number;
+  pricingReady?: boolean;
+  pricingPending?: Array<'DELIVERY' | 'STAIN'>;
   paymentStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'VOIDED' | 'ERROR' | null;
   client?: { id?: string; name: string; email: string; phone?: string };
   statusHistory?: OrderStatusHistoryItem[];
