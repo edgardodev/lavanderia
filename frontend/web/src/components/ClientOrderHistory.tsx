@@ -38,7 +38,11 @@ export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; 
         <div className="mt-4 grid gap-3">
           {(order.statusHistory ?? []).map((item) => (
             <div key={item.id} className="border-l-2 border-aqua/30 pl-4">
-              <p className="text-sm font-black text-aqua">{statusLabels[item.status]}</p>
+              <p className="text-sm font-black text-aqua">
+                {item.status === 'QUEUED' && order.paymentStatus !== 'APPROVED'
+                  ? 'Solicitud creada · pendiente de pago'
+                  : statusLabels[item.status]}
+              </p>
               <p className="mt-1 text-sm leading-6 text-slate-600">{item.message}</p>
               <p className="mt-1 text-[11px] font-bold text-slate-400">{formatDateTime(item.createdAt)}</p>
             </div>
