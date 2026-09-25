@@ -204,7 +204,7 @@ export default function AssistedPage() {
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={submitting}>{submitting ? 'Creando...' : 'Crear servicio'}</Button>
-              {createdId && createdOrder?.pricingReady !== false && <WompiCheckoutButton type="order" id={createdId} />}
+              {createdId && createdOrder && createdOrder.pricingReady !== false && <WompiCheckoutButton type="order" id={createdId} />}
               {createdId && createdOrder?.pricingReady === false && (
                 <p className="text-sm font-bold text-amber-700">
                   La sede debe confirmar primero los valores variables solicitados. Cuando estén listos podrás pagar desde “Mis servicios asistidos”.
