@@ -150,5 +150,20 @@ export function assertProductionSecrets() {
   }
 
   requireProductionValue('FIREBASE_STORAGE_BUCKET');
-  requireProductionValue('FIREBASE_SERVICE_ACCOUNT_JSON');
+  const firebaseServiceAccount = requireProductionValue('FIREBASE_SERVICE_ACCOUNT_JSON');
+  let parsedServiceAccount: Record<string, unknown>;
+  try {
+    parsedServiceAccount = JSON.parse(firebaseServiceAccount) as Record<string, unknown>;
+  } catch {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON debe contener JSON válido en producción.');
+  }
+  if (
+    !parsedServiceAccount
+    || typeof parsedServiceAccount !== 'object'
+    || typeof parsedServiceAccount.project_id !== 'string'
+    || typeof parsedServiceAccount.client_email !== 'string'
+    || typeof parsedServiceAccount.private_key !== 'string'
+  ) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON no contiene los campos mínimos esperados.');
+  }
 }
