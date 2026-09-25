@@ -94,7 +94,7 @@ function csrfCookieOptions(maxAge: number) {
 
 function signSession(user: { id: string; role: Role; sessionVersion: number }, mfa: boolean) {
   const hours = user.role === Role.ADMIN ? ADMIN_SESSION_HOURS : CLIENT_SESSION_HOURS;
-  const options: SignOptions = { expiresIn: `${hours}h` };
+  const options: SignOptions = { expiresIn: `${hours}h`, algorithm: 'HS256' };
   return jwt.sign(
     { sub: user.id, role: user.role, ver: user.sessionVersion, mfa, purpose: 'session' },
     jwtSecret(),
@@ -106,7 +106,7 @@ function signAdminPreauth(user: { id: string; sessionVersion: number }) {
   return jwt.sign(
     { sub: user.id, role: Role.ADMIN, ver: user.sessionVersion, mfa: false, purpose: 'admin-setup' },
     jwtSecret(),
-    { expiresIn: `${ADMIN_PREAUTH_MINUTES}m` },
+    { expiresIn: `${ADMIN_PREAUTH_MINUTES}m`, algorithm: 'HS256' },
   );
 }
 
@@ -130,7 +130,7 @@ export function readSession(req: Request): SessionPayload | undefined {
   const token = req.cookies?.auth_token;
   if (!token) return undefined;
   try {
-    return jwt.verify(token, jwtSecret()) as SessionPayload;
+    return jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as SessionPayload;
   } catch {
     return undefined;
   }
@@ -140,7 +140,7 @@ function readAdminPreauth(req: Request): SessionPayload | undefined {
   const token = req.cookies?.admin_preauth;
   if (!token) return undefined;
   try {
-    const payload = jwt.verify(token, jwtSecret()) as SessionPayload;
+    const payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as SessionPayload;
     if (payload.purpose !== 'admin-setup' || payload.role !== Role.ADMIN) return undefined;
     return payload;
   } catch {
