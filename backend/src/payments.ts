@@ -181,6 +181,22 @@ function transactionMatchesPayment(transaction: Record<string, unknown>, payment
     && String(transaction.currency ?? '') === payment.currency;
 }
 
+function summarizeWompiEvent(body: any, transaction: Record<string, unknown>) {
+  return {
+    event: String(body?.event ?? ''),
+    environment: String(body?.environment ?? ''),
+    timestamp: Number.isInteger(body?.timestamp) ? body.timestamp : null,
+    transaction: {
+      id: String(transaction.id ?? ''),
+      reference: String(transaction.reference ?? ''),
+      status: String(transaction.status ?? ''),
+      amountInCents: Number(transaction.amount_in_cents),
+      currency: String(transaction.currency ?? ''),
+      paymentMethodType: String(transaction.payment_method_type ?? ''),
+    },
+  };
+}
+
 export function registerWompiPaymentRoutes(
   app: Express,
   prisma: PrismaClient,
@@ -209,6 +225,13 @@ export function registerWompiPaymentRoutes(
         }
         if (reservation.status === ReservationStatus.CANCELLED) {
           return res.status(409).json({ message: 'Esta reserva fue cancelada. Crea una nueva reserva.' });
+        }
+      }
+
+      if (resource.paymentId) {
+        const linkedPayment = await prisma.payment.findUnique({ where: { id: resource.paymentId } });
+        if (linkedPayment?.status === PaymentStatus.APPROVED) {
+          return res.status(409).json({ message: 'Este servicio ya está pagado.' });
         }
       }
 
@@ -250,13 +273,46 @@ export function registerWompiPaymentRoutes(
           },
         });
 
-        if (type === 'reservation') {
-          await tx.reservation.update({ where: { id }, data: { paymentId: created.id } });
-        } else {
-          await tx.laundryOrder.update({ where: { id }, data: { paymentId: created.id } });
+        const linked = type === 'reservation'
+          ? await tx.reservation.updateMany({
+              where: {
+                id,
+                clientId: user.id,
+                status: ReservationStatus.PENDING_PAYMENT,
+                paymentId: resource.paymentId ?? null,
+              },
+              data: { paymentId: created.id },
+            })
+          : await tx.laundryOrder.updateMany({
+              where: {
+                id,
+                clientId: user.id,
+                paymentId: resource.paymentId ?? null,
+              },
+              data: { paymentId: created.id },
+            });
+
+        if (linked.count !== 1) {
+          await tx.payment.delete({ where: { id: created.id } });
+          return null;
         }
         return created;
       });
+
+      if (!payment) {
+        const concurrentResource = await ownedResource(prisma, type, id, user.id);
+        const concurrentPayment = concurrentResource?.paymentId
+          ? await prisma.payment.findUnique({ where: { id: concurrentResource.paymentId } })
+          : null;
+        if (
+          concurrentPayment?.status === PaymentStatus.PENDING
+          && concurrentPayment.expiresAt
+          && concurrentPayment.expiresAt > new Date()
+        ) {
+          return res.json({ checkout: buildCheckout(concurrentPayment, user) });
+        }
+        return res.status(409).json({ message: 'Otro intento de pago se creó al mismo tiempo. Actualiza el estado antes de reintentar.' });
+      }
 
       return res.json({ checkout: buildCheckout(payment, user) });
     } catch (error: any) {
@@ -322,6 +378,25 @@ export function registerWompiPaymentRoutes(
         return res.status(409).json({ message: 'El evento no coincide con el pago registrado.' });
       }
 
+      if (FINAL_PAYMENT_STATUSES.has(payment.status)) {
+        if (payment.status !== status) {
+          await prisma.auditLog.create({
+            data: {
+              action: 'WOMPI_EVENT_IGNORED_AFTER_FINAL',
+              entity: 'PAYMENT',
+              entityId: payment.id,
+              metadata: {
+                storedStatus: payment.status,
+                incomingStatus: status,
+                reference,
+                transactionId,
+              },
+            },
+          });
+        }
+        return res.status(200).json({ received: true });
+      }
+
       if (FINAL_PAYMENT_STATUSES.has(status)) {
         const remote = await fetchWompiTransaction(transactionId);
         if (!transactionMatchesPayment(remote, payment) || String(remote.status ?? '').toUpperCase() !== String(transaction.status ?? '').toUpperCase()) {
@@ -336,39 +411,53 @@ export function registerWompiPaymentRoutes(
           data: {
             status,
             wompiTransactionId: transactionId,
-            rawResponse: req.body,
+            rawResponse: summarizeWompiEvent(req.body, transaction),
             processedAt,
           },
         });
 
         let appliedToResource = false;
+        let requiresManualReview = false;
         if (payment.resourceType === 'reservation') {
           const reservation = await tx.reservation.findFirst({
             where: { id: payment.resourceId, paymentId: payment.id },
-            select: { id: true },
+            select: { id: true, status: true },
           });
           if (reservation) {
-            appliedToResource = true;
             if (status === PaymentStatus.APPROVED) {
-              await tx.reservation.update({
-                where: { id: reservation.id },
-                data: { status: ReservationStatus.CONFIRMED },
+              const slot = await tx.machineSlot.findUnique({
+                where: { reservationId: reservation.id },
+                select: { id: true },
               });
-            } else if (isFailedPaymentStatus(status)) {
+              if (reservation.status === ReservationStatus.PENDING_PAYMENT && slot) {
+                await tx.reservation.update({
+                  where: { id: reservation.id },
+                  data: { status: ReservationStatus.CONFIRMED },
+                });
+                appliedToResource = true;
+              } else {
+                requiresManualReview = true;
+              }
+            } else if (isFailedPaymentStatus(status) && reservation.status === ReservationStatus.PENDING_PAYMENT) {
               await tx.machineSlot.deleteMany({ where: { reservationId: reservation.id } });
               await tx.reservation.update({
                 where: { id: reservation.id },
                 data: { status: ReservationStatus.CANCELLED },
               });
+              appliedToResource = true;
             }
           }
         } else if (payment.resourceType === 'order') {
           const order = await tx.laundryOrder.findFirst({
             where: { id: payment.resourceId, paymentId: payment.id },
-            select: { id: true },
+            select: { id: true, status: true },
           });
           if (order) {
-            appliedToResource = true;
+            if (status === PaymentStatus.APPROVED && order.status === 'CANCELLED') {
+              requiresManualReview = true;
+            } else {
+              appliedToResource = true;
+            }
             if (isFailedPaymentStatus(status)) {
               await tx.laundryOrder.update({ where: { id: order.id }, data: { paymentId: null } });
             }
@@ -386,6 +475,7 @@ export function registerWompiPaymentRoutes(
               reference,
               transactionId,
               status,
+              requiresManualReview,
             },
           },
         });
