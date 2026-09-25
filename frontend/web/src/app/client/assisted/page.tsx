@@ -260,6 +260,12 @@ export default function AssistedPage() {
                     </span>
                   )}
                 </div>
+                {selectedOrder.paymentStatus !== 'APPROVED' && selectedOrder.status !== 'CANCELLED' && (
+                  <div className="rounded-3xl border border-yellowBrand/60 bg-yellowBrand/15 p-4">
+                    <p className="mb-3 text-sm font-black text-slate-900">Pago pendiente</p>
+                    <WompiCheckoutButton type="order" id={selectedOrder.id} />
+                  </div>
+                )}
                 <ClientOrderHistory order={selectedOrder} onChanged={() => void loadOrders()} />
               </div>
             ) : (
