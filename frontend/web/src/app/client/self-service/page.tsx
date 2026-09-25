@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { PriceSummary } from "@/components/PriceSummary";
 import { WompiCheckoutButton } from "@/components/WompiCheckoutButton";
 import { Button, Card, Field, Input, Select, Textarea } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import {
+  bogotaToday,
   branchSeed,
   businessHours,
   cycleLabels,
@@ -40,7 +41,7 @@ type DaySchedule = {
   slots: string[];
 };
 
-const today = new Date().toISOString().slice(0, 10);
+const today = bogotaToday();
 
 const initialDraft: SelfServiceDraft = {
   branchId: branchSeed[0]?.id ?? "",
