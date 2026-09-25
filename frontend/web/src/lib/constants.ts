@@ -106,6 +106,15 @@ export const businessHours = {
   selfServiceLimit: 'Autoservicio recibido hasta las 5:00 p.m.',
 };
 
+export function bogotaToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 export const dataTreatmentText =
   'Autorizo a La Lavandería & Bakery para tratar los datos necesarios para gestionar esta solicitud, conforme a la política de tratamiento de datos personales disponible en la aplicación.';
 
