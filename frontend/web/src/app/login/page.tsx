@@ -9,6 +9,14 @@ import { ApiError, apiFetch } from "@/lib/api";
 
 type LoginMode = "CLIENT" | "ADMIN";
 
+function safeNextPath(value: string | null, role: string) {
+  const fallback = role === "ADMIN" ? "/admin/dashboard" : "/client/dashboard";
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return fallback;
+  if (role === "ADMIN" && !value.startsWith("/admin")) return fallback;
+  if (role !== "ADMIN" && !value.startsWith("/client")) return fallback;
+  return value;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<LoginMode>("CLIENT");
@@ -40,9 +48,9 @@ export default function LoginPage() {
         { method: "POST", body: JSON.stringify(payload) },
       );
       const params = new URLSearchParams(window.location.search);
-      const next = params.get("next");
+      const next = safeNextPath(params.get("next"), data.user.role);
       router.refresh();
-      router.push(next ?? (data.user.role === "ADMIN" ? "/admin/dashboard" : "/client/dashboard"));
+      router.push(next);
     } catch (err) {
       if (mode === "ADMIN" && err instanceof ApiError && err.status === 428) {
         router.push("/admin/security/setup");
