@@ -29,6 +29,7 @@ import { readSession, registerAuthRoutes, type AuthenticatedUser } from './auth.
 import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
 import { registerIdempotentClientServiceRoutes } from './client-services.js';
+import { businessDaySchedule } from './business-calendar.js';
 
 assertProductionSecrets();
 
@@ -143,11 +144,6 @@ const doneForYouPrices: Record<CycleType, number> = {
   FULL: 44000,
 };
 
-const allowedSlotByDay = {
-  weekday: new Set(['07:00-09:00', '09:00-11:00', '11:00-13:00', '13:00-15:00', '15:00-17:00', '17:00-19:00']),
-  sunday: new Set(['09:00-11:00', '11:00-13:00', '13:00-15:00', '15:00-17:00']),
-};
-
 if (isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -225,8 +221,8 @@ function businessDate(date: string) {
   return parsed;
 }
 
-function validateReservationSlot(date: string, slot: string) {
-  const selectedDate = businessDate(date);
+async function validateReservationSlot(date: string, slot: string) {
+  businessDate(date);
   const todayBogota = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
     year: 'numeric',
@@ -235,9 +231,12 @@ function validateReservationSlot(date: string, slot: string) {
   }).format(new Date());
 
   if (date < todayBogota) throw new Error('No puedes reservar fechas pasadas.');
-  const day = selectedDate.getUTCDay();
-  const allowed = day === 0 ? allowedSlotByDay.sunday : allowedSlotByDay.weekday;
-  if (!allowed.has(slot)) throw new Error('La franja horaria no está disponible para ese día.');
+  const schedule = await businessDaySchedule(prisma, date);
+  if (!schedule.slots.includes(slot as never)) {
+    throw new Error(schedule.scheduleType === 'SUNDAY_HOLIDAY'
+      ? 'En domingos y festivos solo están disponibles las franjas de 9:00 a.m. a 5:00 p.m.'
+      : 'La franja horaria no está disponible para ese día.');
+  }
 
   const { scheduledStart, scheduledEnd } = parseSlot(date, slot);
   if (scheduledStart >= scheduledEnd) throw new Error('La franja horaria es inválida.');
@@ -326,6 +325,16 @@ app.get('/api/ready', async (_req, res) => {
   }
 });
 
+app.get('/api/calendar/day', async (req, res) => {
+  try {
+    const date = String(req.query.date ?? '');
+    if (!date) return res.status(400).json({ message: 'La fecha es obligatoria.' });
+    return res.json(await businessDaySchedule(prisma, date));
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message ?? 'No se pudo consultar el horario del día.' });
+  }
+});
+
 app.get('/api/branches', async (_req, res, next) => {
   try {
     const branches = await prisma.branch.findMany({
@@ -359,7 +368,7 @@ app.get('/api/reservations/availability', async (req, res) => {
     });
     if (!branch || !branch.isActive) return res.status(404).json({ message: 'Sede no disponible.' });
 
-    const { scheduledStart, scheduledEnd } = validateReservationSlot(date, slot);
+    const { scheduledStart, scheduledEnd } = await validateReservationSlot(date, slot);
     const occupancies = await prisma.machineSlot.findMany({
       where: { branchId, scheduledStart, scheduledEnd },
       select: { machineId: true, type: true },
@@ -469,7 +478,7 @@ app.post('/api/admin/machine-blocks', async (req, res) => {
       return res.status(400).json({ message: 'Sede, máquina, fecha y franja son obligatorias.' });
     }
 
-    const { scheduledStart, scheduledEnd } = validateReservationSlot(date, slot);
+    const { scheduledStart, scheduledEnd } = await validateReservationSlot(date, slot);
     const machine = await prisma.machine.findFirst({
       where: { id: machineId, branchId, isActive: true, branch: { isActive: true } },
     });
