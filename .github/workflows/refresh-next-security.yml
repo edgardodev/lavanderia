@@ -1,0 +1,49 @@
+name: One-time Next security refresh
+
+on:
+  push:
+    branches:
+      - hardening/admin-workflow
+    paths:
+      - .github/workflows/refresh-next-security.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: hardening/admin-workflow
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - name: Upgrade Next.js security patch
+        working-directory: frontend/web
+        run: npm install next@16.3.6 --save-exact
+      - name: Build and audit frontend
+        working-directory: frontend/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000/api
+          NEXT_PUBLIC_FIREBASE_API_KEY: test
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: test.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: test
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: test.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: test
+          NEXT_PUBLIC_FIREBASE_APP_ID: test
+          NEXT_PUBLIC_FIREBASE_VAPID_KEY: test
+        run: |
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - name: Commit security refresh and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/refresh-next-security.yml
+          git add frontend/web/package.json frontend/web/package-lock.json
+          git commit -m "chore: upgrade Next.js to 16.3.6 security release"
+          git push origin HEAD:hardening/admin-workflow
