@@ -232,7 +232,7 @@ async function validateReservationSlot(date: string, slot: string) {
 
   if (date < todayBogota) throw new Error('No puedes reservar fechas pasadas.');
   const schedule = await businessDaySchedule(prisma, date);
-  if (!schedule.slots.includes(slot as never)) {
+  if (!schedule.slots.some((value) => value === slot)) {
     throw new Error(schedule.scheduleType === 'SUNDAY_HOLIDAY'
       ? 'En domingos y festivos solo están disponibles las franjas de 9:00 a.m. a 5:00 p.m.'
       : 'La franja horaria no está disponible para ese día.');
