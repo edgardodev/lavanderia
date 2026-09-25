@@ -71,6 +71,7 @@ export interface Reservation {
   machineCode?: string;
   cycleType: CycleType;
   status?: 'PENDING_PAYMENT' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
+  paymentStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'VOIDED' | 'ERROR' | null;
   date: string;
   slot: string;
   notes?: string;
