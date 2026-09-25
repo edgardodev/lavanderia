@@ -157,7 +157,17 @@ async function orderDto(order: any, includeInternal: boolean) {
     stainService: Boolean(order.stainService),
     notes: order.notes ?? undefined,
     status: order.status,
+    baseAmountCents: order.baseAmountCents,
+    deliveryFeeCents: order.deliveryFeeCents ?? null,
+    stainFeeCents: order.stainFeeCents ?? null,
     amountCents: order.amountCents,
+    pricingReady:
+      (order.pickupType !== 'DELIVERY' || order.deliveryFeeCents !== null)
+      && (!order.stainService || order.stainFeeCents !== null),
+    pricingPending: [
+      ...(order.pickupType === 'DELIVERY' && order.deliveryFeeCents === null ? ['DELIVERY'] : []),
+      ...(order.stainService && order.stainFeeCents === null ? ['STAIN'] : []),
+    ],
     paymentStatus: order.payment?.status ?? null,
     client: order.client
       ? { id: order.client.id, name: order.client.name, email: order.client.email, phone: order.client.phone ?? undefined }
@@ -291,6 +301,125 @@ export function registerAssistedRoutes(
         }),
       });
     } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/admin/orders/:orderId/pricing', async (req, res, next) => {
+    try {
+      const admin = await requireUser(req, res, Role.ADMIN);
+      if (!admin) return;
+      const orderId = String(req.params.orderId);
+
+      const existing = await prisma.laundryOrder.findUnique({
+        where: { id: orderId },
+        include: { payment: { select: { id: true, status: true, expiresAt: true } } },
+      });
+      if (!existing) return res.status(404).json({ message: 'Orden no encontrada.' });
+      if (existing.status !== OrderStatus.QUEUED) {
+        return res.status(409).json({ message: 'Los cargos solo pueden definirse antes de iniciar el proceso de lavandería.' });
+      }
+      if (existing.payment?.status === PaymentStatus.APPROVED) {
+        return res.status(409).json({ message: 'No se pueden cambiar cargos después de un pago aprobado.' });
+      }
+      if (
+        existing.payment?.status === PaymentStatus.PENDING
+        && existing.payment.expiresAt
+        && existing.payment.expiresAt > new Date()
+      ) {
+        return res.status(409).json({ message: 'Hay un checkout de Wompi activo. Espera a que termine o expire antes de cambiar los cargos.' });
+      }
+
+      const parseFee = (value: unknown, required: boolean, label: string) => {
+        if (!required) return null;
+        if (value === undefined || value === null || value === '') {
+          throw new Error(`Debes ingresar el valor de ${label}.`);
+        }
+        const cop = Number(value);
+        if (!Number.isInteger(cop) || cop < 0 || cop > 1_000_000) {
+          throw new Error(`El valor de ${label} debe ser un número entero entre $0 y $1.000.000 COP.`);
+        }
+        return cop * 100;
+      };
+
+      const deliveryFeeCents = parseFee(
+        req.body?.deliveryFeeCop,
+        existing.pickupType === 'DELIVERY',
+        'domicilio',
+      );
+      const stainFeeCents = parseFee(
+        req.body?.stainFeeCop,
+        existing.stainService,
+        'desmanche/despercude',
+      );
+      const amountCents = existing.baseAmountCents + (deliveryFeeCents ?? 0) + (stainFeeCents ?? 0);
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const current = await tx.laundryOrder.findUnique({
+          where: { id: orderId },
+          include: { payment: { select: { status: true, expiresAt: true } } },
+        });
+        if (!current || current.status !== OrderStatus.QUEUED) {
+          throw new Error('La orden cambió mientras se actualizaba el valor. Recarga e intenta nuevamente.');
+        }
+        if (current.payment?.status === PaymentStatus.APPROVED) {
+          throw new Error('El pago ya fue aprobado y el valor no puede cambiar.');
+        }
+        if (
+          current.payment?.status === PaymentStatus.PENDING
+          && current.payment.expiresAt
+          && current.payment.expiresAt > new Date()
+        ) {
+          throw new Error('Hay un checkout de Wompi activo. No se modificó el valor.');
+        }
+
+        const order = await tx.laundryOrder.update({
+          where: { id: orderId },
+          data: {
+            deliveryFeeCents,
+            stainFeeCents,
+            amountCents,
+            paymentId: current.payment?.status === PaymentStatus.PENDING ? current.paymentId : null,
+          },
+          include: orderInclude,
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorId: admin.id,
+            action: 'ORDER_PRICING_UPDATED',
+            entity: 'LAUNDRY_ORDER',
+            entityId: orderId,
+            metadata: {
+              baseAmountCents: current.baseAmountCents,
+              deliveryFeeCents,
+              stainFeeCents,
+              amountCents,
+            },
+          },
+        });
+        return order;
+      });
+
+      const push = await notifyClient(
+        prisma,
+        existing.clientId,
+        'Valor del servicio confirmado',
+        'La sede confirmó los cargos variables. Revisa el total y continúa con el pago desde la aplicación.',
+        { type: 'ORDER_PRICING', orderId, url: '/client/assisted' },
+      );
+
+      return res.json({ order: await orderDto(updated, true), notificationSent: push.sent > 0 });
+    } catch (error: any) {
+      if (error instanceof Error && (
+        error.message.startsWith('Debes ingresar')
+        || error.message.startsWith('El valor de')
+        || error.message.includes('checkout')
+        || error.message.includes('pago ya fue aprobado')
+        || error.message.includes('orden cambió')
+      )) {
+        return res.status(409).json({ message: error.message });
+      }
       next(error);
     }
   });
