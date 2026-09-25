@@ -119,20 +119,24 @@ export const storageKeys = {
   evidence: 'llb_evidence_v2',
 };
 
-export function getTimeSlotsForDate(dateValue: string) {
+export function timeSlotOptions(values: string[]) {
+  return values.map((value) => {
+    const [startLabel, endLabel] = value.split('-');
+    return { value, label: `${startLabel} - ${endLabel}` };
+  });
+}
+
+export function getTimeSlotsForDate(dateValue: string, isHoliday = false) {
   if (!dateValue) return [];
   const date = new Date(`${dateValue}T12:00:00`);
   if (Number.isNaN(date.getTime())) return [];
   const day = date.getDay();
-  const isSunday = day === 0;
-  const starts = isSunday ? [9, 11, 13, 15] : [7, 9, 11, 13, 15, 17];
-  return starts.map((hour) => {
+  const isSundayHoliday = day === 0 || isHoliday;
+  const starts = isSundayHoliday ? [9, 11, 13, 15] : [7, 9, 11, 13, 15, 17];
+  return timeSlotOptions(starts.map((hour) => {
     const end = hour + 2;
     const startLabel = `${String(hour).padStart(2, '0')}:00`;
     const endLabel = `${String(end).padStart(2, '0')}:00`;
-    return {
-      value: `${startLabel}-${endLabel}`,
-      label: `${startLabel} - ${endLabel}`,
-    };
-  });
+    return `${startLabel}-${endLabel}`;
+  }));
 }
