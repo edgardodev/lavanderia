@@ -103,6 +103,7 @@ function reservationDto(reservation: any) {
     machineCode: reservation.machine?.code,
     cycleType: reservation.cycleType,
     status: reservation.status,
+    paymentStatus: reservation.payment?.status ?? null,
     date: formatBogotaDate(reservation.scheduledStart),
     slot: `${formatBogotaTime(reservation.scheduledStart)}-${formatBogotaTime(reservation.scheduledEnd)}`,
     notes: reservation.notes ?? undefined,
@@ -140,7 +141,7 @@ export function registerIdempotentClientServiceRoutes(
 
       const existing = await prisma.reservation.findUnique({
         where: { requestKey: key },
-        include: { branch: true, machine: true },
+        include: { branch: true, machine: true, payment: { select: { status: true } } },
       });
       if (existing) {
         if (existing.clientId !== user.id) return res.status(409).json({ message: 'Clave de solicitud ya utilizada.' });
@@ -179,7 +180,7 @@ export function registerIdempotentClientServiceRoutes(
             amountCents: toWompiCents(selfServicePrices[cycleType]),
             notes,
           },
-          include: { branch: true, machine: true },
+          include: { branch: true, machine: true, payment: { select: { status: true } } },
         });
         await tx.machineSlot.create({
           data: {
@@ -200,7 +201,7 @@ export function registerIdempotentClientServiceRoutes(
       if (key && user && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const existing = await prisma.reservation.findUnique({
           where: { requestKey: key },
-          include: { branch: true, machine: true },
+          include: { branch: true, machine: true, payment: { select: { status: true } } },
         });
         if (existing?.clientId === user.id) {
           return res.status(200).json({ reservation: reservationDto(existing), idempotentReplay: true });
@@ -217,7 +218,7 @@ export function registerIdempotentClientServiceRoutes(
       if (!user) return;
       const reservations = await prisma.reservation.findMany({
         where: { clientId: user.id },
-        include: { branch: true, machine: true },
+        include: { branch: true, machine: true, payment: { select: { status: true } } },
         orderBy: { createdAt: 'desc' },
         take: 100,
       });
