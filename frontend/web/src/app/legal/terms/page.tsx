@@ -36,7 +36,7 @@ export default function TermsPage() {
 
             <section>
               <h2 className="text-xl font-black text-slate-950">4. Precios y pago</h2>
-              <p className="mt-2">Los precios se informan en pesos colombianos antes de iniciar el pago. Cuando correspondan cargos adicionales —por ejemplo, domicilio o servicios especiales— deberán mostrarse antes de la aceptación de la transacción. Los pagos electrónicos se procesan mediante Wompi u otro proveedor expresamente informado.</p>
+              <p className="mt-2">Los precios se informan en pesos colombianos antes de iniciar el pago. Cuando correspondan cargos variables —por ejemplo, domicilio o desmanche/despercude— la persona encargada de la sede definirá el valor aplicable a la orden según las condiciones reales del servicio. El total actualizado se mostrará al usuario antes de habilitar el pago. Los pagos electrónicos se procesan mediante Wompi u otro proveedor expresamente informado.</p>
               <p className="mt-2">El navegador no determina por sí solo que un pago fue exitoso. La confirmación se produce cuando el proveedor de pagos notifica y el servidor valida el estado de la transacción.</p>
             </section>
 
