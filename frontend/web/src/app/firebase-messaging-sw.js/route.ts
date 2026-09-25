@@ -23,7 +23,7 @@ messaging.onBackgroundMessage((payload) => {
   if (payload.notification) return;
   const title = payload.data?.title || 'La Lavandería & Bakery';
   const body = payload.data?.body || 'Tienes una actualización de tu servicio.';
-  const url = payload.data?.url || '/client/dashboard';
+  const url = payload.data?.url || '/client/assisted';
   self.registration.showNotification(title, {
     body,
     icon: '/logo.png',
