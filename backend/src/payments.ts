@@ -167,7 +167,16 @@ async function ownedResource(
 
   return prisma.laundryOrder.findFirst({
     where: { id, clientId: userId },
-    select: { id: true, amountCents: true, status: true, paymentId: true },
+    select: {
+      id: true,
+      amountCents: true,
+      status: true,
+      paymentId: true,
+      pickupType: true,
+      stainService: true,
+      deliveryFeeCents: true,
+      stainFeeCents: true,
+    },
   });
 }
 
@@ -225,6 +234,22 @@ export function registerWompiPaymentRoutes(
         }
         if (reservation.status === ReservationStatus.CANCELLED) {
           return res.status(409).json({ message: 'Esta reserva fue cancelada. Crea una nueva reserva.' });
+        }
+      } else {
+        const order = resource as typeof resource & {
+          pickupType: string;
+          stainService: boolean;
+          deliveryFeeCents: number | null;
+          stainFeeCents: number | null;
+        };
+        const pendingLabels = [
+          ...(order.pickupType === 'DELIVERY' && order.deliveryFeeCents === null ? ['domicilio'] : []),
+          ...(order.stainService && order.stainFeeCents === null ? ['desmanche/despercude'] : []),
+        ];
+        if (pendingLabels.length) {
+          return res.status(409).json({
+            message: `La sede debe confirmar el valor de ${pendingLabels.join(' y ')} antes de abrir el pago.`,
+          });
         }
       }
 
