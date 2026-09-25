@@ -134,6 +134,7 @@ export default function AdminOrdersPage() {
                       orderId={order.id}
                       currentStatus={order.status}
                       pickupType={order.pickupType}
+                      canAdvance={order.paymentStatus === 'APPROVED'}
                       onUpdated={() => void load()}
                     />
                   </div>
