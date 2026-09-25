@@ -214,10 +214,16 @@ export default function AssistedPage() {
           <Card>
             <h2 className="text-2xl font-black text-slate-950">Seguimiento de ropa</h2>
             <p className="mt-2 text-sm text-slate-500">Aquí ves el avance solamente de los servicios que entregas al equipo para que nosotros hagamos el proceso.</p>
-            {selectedOrder ? (
+            {selectedOrder?.paymentStatus === 'APPROVED' ? (
               <div className="mt-6">
                 <StatusTimeline currentStatus={selectedOrder.status} pickupType={selectedOrder.pickupType} />
               </div>
+            ) : selectedOrder ? (
+              <p className="mt-6 rounded-3xl bg-amber-50 p-4 text-sm font-bold text-amber-800">
+                {selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING'
+                  ? 'El pago no está aprobado. El proceso de lavandería no comenzará hasta tener un pago aprobado.'
+                  : 'Tu solicitud está creada y pendiente de pago. El seguimiento de la ropa comenzará cuando el pago sea aprobado.'}
+              </p>
             ) : (
               <p className="mt-6 rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Cuando crees tu primer servicio “Lo hacemos por ti”, aquí aparecerá su seguimiento.</p>
             )}
@@ -246,7 +252,13 @@ export default function AssistedPage() {
                     <p className="font-black text-slate-950">{branchName(selectedOrder)} · {cycleLabels[selectedOrder.cycleType]}</p>
                     <p className="mt-1 text-sm text-slate-500">{selectedOrder.pickupType === 'DELIVERY' ? 'Domicilio' : 'Recoge en sede'}</p>
                   </div>
-                  <StatusBadge status={selectedOrder.status} />
+                  {selectedOrder.paymentStatus === 'APPROVED' ? (
+                    <StatusBadge status={selectedOrder.status} />
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">
+                      {selectedOrder.paymentStatus && selectedOrder.paymentStatus !== 'PENDING' ? 'Pago no aprobado' : 'Pendiente de pago'}
+                    </span>
+                  )}
                 </div>
                 <ClientOrderHistory order={selectedOrder} onChanged={() => void loadOrders()} />
               </div>
