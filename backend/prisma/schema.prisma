@@ -196,9 +196,12 @@ model LaundryOrder {
   branchId     String?
   serviceMode  ServiceMode @default(DONE_FOR_YOU)
   cycleType    CycleType
-  status       OrderStatus @default(QUEUED)
-  amountCents  Int
-  pickupType   String      @default("STORE")
+  status            OrderStatus @default(QUEUED)
+  baseAmountCents   Int
+  deliveryFeeCents  Int?
+  stainFeeCents     Int?
+  amountCents       Int
+  pickupType        String      @default("STORE")
   address      String?     @db.VarChar(250)
   pieces       Int?
   stainService Boolean     @default(false)
