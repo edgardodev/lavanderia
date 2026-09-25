@@ -1,0 +1,133 @@
+name: One-time production validation
+
+on:
+  push:
+    branches:
+      - hardening/admin-workflow
+    paths:
+      - .github/workflows/production-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: lavanderia_validation
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: mysql://root@127.0.0.1:3306/lavanderia_validation
+      WEB_ORIGIN: http://localhost:3000
+      TEST_WEB_ORIGIN: http://localhost:3000
+      TEST_API_URL: http://127.0.0.1:4000/api
+      ADMIN_BOOTSTRAP_NAME: Validation Root
+      ADMIN_BOOTSTRAP_EMAIL: validation-admin@example.com
+      BRANCH_UNIVERSIDAD_METROPOLITANA_ADDRESS: Validation address 1
+      BRANCH_CRA_46_ADDRESS: Validation address 2
+      BRANCH_VILLA_CAROLINA_ADDRESS: Validation address 3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: hardening/admin-workflow
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/web/package-lock.json
+
+      - name: Reject tracked secret files
+        shell: bash
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)\.env($|\.)|firebase-adminsdk|service-account|\.pem$|\.key$' | grep -v -E '\.env\.example$' || true)"
+          if [ -n "$bad" ]; then
+            echo "Sensitive-looking files are tracked:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Install and build backend
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+          npm audit --omit=dev --audit-level=high
+
+      - name: Install, verify and build frontend
+        working-directory: frontend/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000/api
+          NEXT_PUBLIC_FIREBASE_API_KEY: test
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: test.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: test
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: test.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: test
+          NEXT_PUBLIC_FIREBASE_APP_ID: test
+          NEXT_PUBLIC_FIREBASE_VAPID_KEY: test
+        run: |
+          npm ci
+          node -e "const v=require('next/package.json').version;if(v!=='16.3.6')throw new Error('Expected Next 16.3.6, got '+v)"
+          npm run build
+          npm audit --omit=dev --audit-level=high
+
+      - name: Generate validation secrets
+        working-directory: backend
+        run: |
+          node - <<'NODE'
+          const { randomBytes } = require('node:crypto');
+          const fs = require('node:fs');
+          fs.appendFileSync(process.env.GITHUB_ENV, [
+            'ADMIN_BOOTSTRAP_PASSWORD=Z9!' + randomBytes(16).toString('hex') + 'aA',
+            'JWT_SECRET=' + randomBytes(48).toString('base64url'),
+            'MFA_ENCRYPTION_KEY=' + randomBytes(32).toString('base64'),
+          ].join('\n') + '\n');
+          NODE
+
+      - name: Apply migrations and seed
+        working-directory: backend
+        run: |
+          npx prisma migrate deploy
+          npm run seed
+
+      - name: Start API and run integration smoke
+        working-directory: backend
+        run: |
+          npm start >/tmp/lavanderia-api.log 2>&1 &
+          echo $! >/tmp/lavanderia-api.pid
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/api/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4000/api/ready >/dev/null || { cat /tmp/lavanderia-api.log; exit 1; }
+          node scripts/integration-smoke.mjs
+          TARGET_URL=http://127.0.0.1:4000 PATHNAME=/api/health REQUESTS=100 CONCURRENCY=20 TIMEOUT_MS=3000 MAX_P95_MS=1500 MAX_ERROR_RATE=0.02 node scripts/load-smoke.mjs
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/lavanderia-api.pid ]; then
+            kill -TERM "$(cat /tmp/lavanderia-api.pid)" 2>/dev/null || true
+          fi
+
+      - name: Remove one-time workflow after successful validation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/production-validation.yml
+          git commit -m "ci: remove completed production validation workflow"
+          git push origin HEAD:hardening/admin-workflow
