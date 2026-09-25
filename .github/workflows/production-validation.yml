@@ -64,7 +64,7 @@ jobs:
           npm ci
           npx prisma generate
           npm run build
-          npm audit --omit=dev --audit-level=high
+          node scripts/audit-runtime.mjs
 
       - name: Install, verify and build frontend
         working-directory: frontend/web
