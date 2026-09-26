@@ -227,6 +227,18 @@ export function registerAssistedRoutes(
     }
   });
 
+  app.get('/api/admin/capabilities', async (req, res, next) => {
+    try {
+      const admin = await requireUser(req, res, Role.ADMIN);
+      if (!admin) return;
+      return res.json({
+        firebaseStorage: firebaseReady(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/admin/orders', async (req, res, next) => {
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
