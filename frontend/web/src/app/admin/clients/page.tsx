@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { BranchTabs } from '@/components/BranchTabs';
 import { Card, Field, Input, Pill, Select } from '@/components/ui';
@@ -55,6 +56,8 @@ export default function AdminClientsPage() {
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-7xl gap-8 px-6 py-12">
+        <AdminDashboardLink />
+
         <section>
           <Pill>Clientes</Pill>
           <h1 className="mt-3 font-title text-5xl text-aqua">Clientes e historial real</h1>
