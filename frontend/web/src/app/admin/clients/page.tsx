@@ -37,8 +37,13 @@ export default function AdminClientsPage() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 30000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [load]);
 
   const filteredClients = useMemo(() => {
