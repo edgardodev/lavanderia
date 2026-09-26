@@ -40,7 +40,9 @@ export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; 
             <div key={item.id} className="border-l-2 border-aqua/30 pl-4">
               <p className="text-sm font-black text-aqua">
                 {item.status === 'QUEUED' && order.paymentStatus !== 'APPROVED'
-                  ? 'Solicitud creada · pendiente de pago'
+                  ? order.pricingReady === false
+                    ? 'Solicitud creada · pendiente de cotización'
+                    : 'Solicitud creada · pendiente de pago'
                   : statusLabels[item.status]}
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-600">{item.message}</p>
