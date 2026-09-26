@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { AdminStatusActions } from '@/components/AdminStatusActions';
 import { BranchTabs } from '@/components/BranchTabs';
@@ -64,6 +65,8 @@ export default function AdminOrdersPage() {
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-7xl gap-8 px-6 py-12">
+        <AdminDashboardLink />
+
         <section>
           <p className="text-xs font-black uppercase tracking-[0.28em] text-aqua">Administrador</p>
           <h1 className="mt-3 font-title text-5xl text-aqua">Órdenes “Lo hacemos por ti”</h1>
