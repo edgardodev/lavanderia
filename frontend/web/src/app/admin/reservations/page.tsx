@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { Card, Field, Input, Select } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
@@ -69,6 +70,8 @@ export default function AdminReservationsPage() {
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-7xl gap-8 px-6 py-12">
+        <AdminDashboardLink />
+
         <section>
           <p className="text-xs font-black uppercase tracking-[0.28em] text-aqua">Agenda</p>
           <h1 className="mt-3 font-title text-5xl text-aqua">Reservas de autoservicio</h1>
