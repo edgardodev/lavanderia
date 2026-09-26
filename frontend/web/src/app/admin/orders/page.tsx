@@ -41,7 +41,7 @@ export default function AdminOrdersPage() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 20000);
+    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
     return () => {
