@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { Card, Field, Input, Select } from '@/components/ui';
@@ -40,24 +40,34 @@ export default function AdminReservationsPage() {
       .catch(() => setBranches(branchSeed));
   }, []);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (branchFilter !== 'all') params.set('branchId', branchFilter);
     if (machineFilter !== 'all') params.set('machineId', machineFilter);
     if (dateFilter) params.set('date', dateFilter);
 
-    apiFetch<{ reservations: Reservation[]; notifications: ReservationNotification[] }>(`/admin/reservations?${params.toString()}`)
-      .then((data) => {
-        setReservations(data.reservations);
-        setNotifications(data.notifications);
-        setError('');
-      })
-      .catch((err) => {
-        setReservations([]);
-        setNotifications([]);
-        setError(err instanceof Error ? err.message : 'No se pudieron cargar las reservas.');
-      });
+    try {
+      const data = await apiFetch<{ reservations: Reservation[]; notifications: ReservationNotification[] }>(`/admin/reservations?${params.toString()}`);
+      setReservations(data.reservations);
+      setNotifications(data.notifications);
+      setError('');
+    } catch (err) {
+      setReservations([]);
+      setNotifications([]);
+      setError(err instanceof Error ? err.message : 'No se pudieron cargar las reservas.');
+    }
   }, [branchFilter, machineFilter, dateFilter]);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
 
   const branchOptions = useMemo(() => [{ id: 'all', name: 'Todas las sedes' }, ...branches], [branches]);
 
