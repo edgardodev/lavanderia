@@ -55,6 +55,8 @@ Use `backend/.env.example` y `frontend/web/.env.example` como inventario. En pro
 
 El frontend también debe compilarse con los valores públicos reales `NEXT_PUBLIC_LEGAL_*`, `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL`, `NEXT_PUBLIC_CUSTOMER_SERVICE_EMAIL` y la configuración pública de Firebase. No copie secretos del backend a variables `NEXT_PUBLIC_*`.
 
+La jornada administrativa usa `ADMIN_SESSION_HOURS=10` por defecto y acepta entre 2 y 12 horas. El panel operativo se actualiza automáticamente cada 5 minutos y también al volver a enfocar la ventana; el cierre de sesión sigue siendo obligatorio al terminar el turno, especialmente en equipos compartidos.
+
 Nunca guarde en GitHub:
 
 - `JWT_SECRET`.
