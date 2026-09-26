@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, ShieldCheck, UserPlus } from 'lucide-react';
+import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { Button, Card, Field, Input, Pill } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
@@ -87,6 +88,8 @@ export default function AdminSecurityPage() {
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-6xl gap-8 px-6 py-12">
+        <AdminDashboardLink />
+
         <section>
           <Pill>Seguridad</Pill>
           <h1 className="mt-3 font-title text-5xl text-aqua">Accesos administrativos</h1>
