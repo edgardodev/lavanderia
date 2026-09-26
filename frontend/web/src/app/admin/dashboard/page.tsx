@@ -124,7 +124,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     const refresh = () => void refreshOperationalData();
-    const timer = window.setInterval(refresh, 30000);
+    const timer = window.setInterval(refresh, 5 * 60 * 1000);
     window.addEventListener('focus', refresh);
     return () => {
       window.clearInterval(timer);
