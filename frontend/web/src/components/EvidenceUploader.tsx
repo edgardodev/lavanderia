@@ -46,9 +46,23 @@ export function EvidenceUploader({ orderId, onUploaded }: { orderId: string; onU
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [storageReady, setStorageReady] = useState<boolean | null>(null);
   const previews = useMemo(() => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) })), [files]);
 
   useEffect(() => () => previews.forEach((preview) => URL.revokeObjectURL(preview.url)), [previews]);
+
+  useEffect(() => {
+    apiFetch<{ firebaseStorage: boolean }>('/admin/capabilities')
+      .then((data) => {
+        setStorageReady(data.firebaseStorage);
+        if (!data.firebaseStorage) {
+          setFiles([]);
+          setMessage('');
+          setError('');
+        }
+      })
+      .catch(() => setStorageReady(false));
+  }, []);
 
   async function selectFiles(selected: File[]) {
     setError('');
@@ -107,7 +121,7 @@ export function EvidenceUploader({ orderId, onUploaded }: { orderId: string; onU
         type="file"
         accept="image/png,image/jpeg,image/webp"
         multiple
-        disabled={processing || uploading}
+        disabled={storageReady !== true || processing || uploading}
         onChange={(event) => void selectFiles(Array.from(event.target.files ?? []))}
         className="rounded-2xl border border-dashed border-aqua/40 bg-white p-3 text-sm disabled:opacity-60"
       />
@@ -122,10 +136,22 @@ export function EvidenceUploader({ orderId, onUploaded }: { orderId: string; onU
           ))}
         </div>
       )}
-      <input name="description" maxLength={500} placeholder="Descripción: prenda manchada, rota, desteñida..." className="rounded-2xl border border-slate-200 px-3 py-2 text-sm" />
-      <button disabled={processing || uploading || files.length === 0} className="rounded-2xl bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
+      <input
+        name="description"
+        maxLength={500}
+        disabled={storageReady !== true || processing || uploading}
+        placeholder="Descripción: prenda manchada, rota, desteñida..."
+        className="rounded-2xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+      />
+      <button disabled={storageReady !== true || processing || uploading || files.length === 0} className="rounded-2xl bg-slate-950 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
         {processing ? 'Comprimiendo...' : uploading ? 'Subiendo...' : 'Guardar evidencia y notificar'}
       </button>
+      {storageReady === null && <p className="text-xs font-bold text-slate-500">Comprobando almacenamiento privado...</p>}
+      {storageReady === false && (
+        <p className="rounded-2xl bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
+          Evidencias deshabilitadas en este entorno. Configura Firebase Storage en el backend para habilitar la carga privada de fotos.
+        </p>
+      )}
       {message && <p className="text-xs font-bold text-emerald-700">{message}</p>}
       {error && <p className="text-xs font-bold text-rose-700">{error}</p>}
     </form>
