@@ -13,7 +13,7 @@ import { nanoid } from 'nanoid';
 import { PrismaClient, Role } from '@prisma/client';
 
 const CLIENT_SESSION_HOURS = 8;
-const ADMIN_SESSION_HOURS = 2;
+const DEFAULT_ADMIN_SESSION_HOURS = 10;
 const ADMIN_PREAUTH_MINUTES = 10;
 const MAX_FAILED_ATTEMPTS = 5;
 const CLIENT_LOCK_MINUTES = 15;
@@ -65,6 +65,12 @@ function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+function adminSessionHours() {
+  const value = Number(process.env.ADMIN_SESSION_HOURS ?? DEFAULT_ADMIN_SESSION_HOURS);
+  if (!Number.isFinite(value)) return DEFAULT_ADMIN_SESSION_HOURS;
+  return Math.min(12, Math.max(2, Math.trunc(value)));
+}
+
 function cookieDomain() {
   const value = String(process.env.COOKIE_DOMAIN ?? '').trim();
   return value || undefined;
@@ -93,7 +99,7 @@ function csrfCookieOptions(maxAge: number) {
 }
 
 function signSession(user: { id: string; role: Role; sessionVersion: number }, mfa: boolean) {
-  const hours = user.role === Role.ADMIN ? ADMIN_SESSION_HOURS : CLIENT_SESSION_HOURS;
+  const hours = user.role === Role.ADMIN ? adminSessionHours() : CLIENT_SESSION_HOURS;
   const options: SignOptions = { expiresIn: `${hours}h`, algorithm: 'HS256' };
   return jwt.sign(
     { sub: user.id, role: user.role, ver: user.sessionVersion, mfa, purpose: 'session' },
@@ -111,7 +117,7 @@ function signAdminPreauth(user: { id: string; sessionVersion: number }) {
 }
 
 function issueSession(res: Response, user: { id: string; role: Role; sessionVersion: number }, mfa: boolean) {
-  const hours = user.role === Role.ADMIN ? ADMIN_SESSION_HOURS : CLIENT_SESSION_HOURS;
+  const hours = user.role === Role.ADMIN ? adminSessionHours() : CLIENT_SESSION_HOURS;
   const maxAge = hours * 60 * 60 * 1000;
   res.cookie('auth_token', signSession(user, mfa), authCookieOptions(maxAge));
   res.cookie('csrf_token', nanoid(32), csrfCookieOptions(maxAge));
