@@ -600,6 +600,19 @@ export function registerAuthRoutes(
     return res.json({ configured: true, recoveryCodes });
   });
 
+  app.get('/api/auth/session', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    return res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  });
+
   app.post('/api/auth/logout', async (_req, res) => {
     res.clearCookie('auth_token', authCookieOptions(0));
     res.clearCookie('csrf_token', csrfCookieOptions(0));
