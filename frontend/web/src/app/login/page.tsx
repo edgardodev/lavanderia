@@ -28,6 +28,7 @@ export default function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("role") === "admin") setMode("ADMIN");
     if (params.get("registered") === "1") setNotice("Cuenta creada. Ya puedes iniciar sesión.");
+    if (params.get("expired") === "1") setNotice("Tu sesión terminó. Inicia sesión nuevamente para continuar.");
   }, []);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
