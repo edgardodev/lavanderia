@@ -1,15 +1,38 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { statusLabels } from '@/lib/constants';
-import type { LaundryOrder } from '@/types';
+import type { LaundryOrder, OrderEvidence } from '@/types';
 
 export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; onChanged: () => void }) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [evidence, setEvidence] = useState<OrderEvidence[]>(order.evidence ?? []);
+  const [evidenceError, setEvidenceError] = useState('');
+  const evidenceKey = useMemo(() => (order.evidence ?? []).map((photo) => photo.id).join(','), [order.evidence]);
+
+  useEffect(() => {
+    const metadata = order.evidence ?? [];
+    setEvidence(metadata);
+    setEvidenceError('');
+    if (metadata.length === 0) return;
+
+    let active = true;
+    apiFetch<{ evidence: OrderEvidence[] }>(`/client/orders/${order.id}/evidence`)
+      .then((data) => {
+        if (active) setEvidence(data.evidence);
+      })
+      .catch((err) => {
+        if (active) setEvidenceError(err instanceof Error ? err.message : 'No se pudieron cargar las fotos.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [order.id, evidenceKey]);
 
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,12 +76,12 @@ export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; 
         </div>
       </div>
 
-      {(order.evidence ?? []).length > 0 && (
+      {evidence.length > 0 && (
         <div>
           <h3 className="text-lg font-black text-slate-950">Fotos de evidencia</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">Los enlaces de las fotos son temporales y solo se generan después de validar tu sesión.</p>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {(order.evidence ?? []).map((photo) => (
+            {evidence.map((photo) => (
               <figure key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                 {photo.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -70,6 +93,7 @@ export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; 
               </figure>
             ))}
           </div>
+          {evidenceError && <p className="mt-2 text-xs font-bold text-amber-700">{evidenceError}</p>}
         </div>
       )}
 
