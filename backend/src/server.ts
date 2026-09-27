@@ -1,10 +1,12 @@
 import 'dotenv/config';
+import { randomUUID } from 'crypto';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
+import pinoHttp from 'pino-http';
 import {
   CycleType,
   MachineSlotType,
@@ -105,7 +107,7 @@ const upload = multer({
   },
 });
 
-const port = Number(process.env.PORT ?? 4000);
+const port = boundedInt(process.env.PORT, 4000, 1, 65535);
 const isProduction = process.env.NODE_ENV === 'production';
 
 function normalizeOrigin(value: string) {
@@ -146,6 +148,23 @@ const doneForYouPrices: Record<CycleType, number> = {
 
 if (isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
+app.use(pinoHttp({
+  genReqId(req, res) {
+    const incoming = req.headers['x-request-id'];
+    const id = typeof incoming === 'string' && /^[A-Za-z0-9._:-]{8,128}$/.test(incoming)
+      ? incoming
+      : randomUUID();
+    res.setHeader('X-Request-Id', id);
+    return id;
+  },
+  redact: {
+    paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+    censor: '[REDACTED]',
+  },
+  autoLogging: {
+    ignore: (req) => req.url === '/api/health' || req.url === '/api/ready',
+  },
+}));
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 app.use(cors({
@@ -161,6 +180,18 @@ app.use(cors({
 app.use(globalConcurrency);
 app.use(express.json({ limit: '256kb', strict: true }));
 app.use(cookieParser());
+app.use((req, res, next) => {
+  if (
+    req.cookies?.auth_token
+    || req.cookies?.admin_preauth
+    || req.path.startsWith('/api/admin/')
+    || req.path.startsWith('/api/client/')
+  ) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
+});
 app.use(apiLimiter);
 app.use(mutationGuard(allowedOrigins));
 app.use('/api/auth', authLimiter);
@@ -309,8 +340,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: process.env.APP_NAME ?? 'La Lavanderia Bakery API' });
 });
 
+let shuttingDown = false;
 let readinessCache: { checkedAt: number; ok: boolean } = { checkedAt: 0, ok: false };
 app.get('/api/ready', async (_req, res) => {
+  if (shuttingDown) return res.status(503).json({ ok: false });
   const now = Date.now();
   if (now - readinessCache.checkedAt < 5_000) {
     return res.status(readinessCache.ok ? 200 : 503).json({ ok: readinessCache.ok });
@@ -566,8 +599,16 @@ app.post('/api/notifications/token', async (req, res, next) => {
   }
 });
 
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
+app.use('/api', (_req, res) => {
+  return res.status(404).json({ message: 'Ruta API no encontrada.' });
+});
+
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (isProduction) {
+    req.log?.error({ err: { name: err?.name, code: err?.code, message: err?.message } }, 'Error de API');
+  } else {
+    console.error(err);
+  }
   if (res.headersSent) return;
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ message: 'La carga de archivos supera los límites permitidos.' });
@@ -593,7 +634,6 @@ if ('keepAliveTimeoutBuffer' in server) {
   (server as typeof server & { keepAliveTimeoutBuffer: number }).keepAliveTimeoutBuffer = 1_000;
 }
 
-let shuttingDown = false;
 function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
