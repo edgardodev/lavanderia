@@ -394,6 +394,85 @@ app.get('/api/branches', async (_req, res, next) => {
   }
 });
 
+app.get('/api/admin/dashboard-summary', async (req, res, next) => {
+  try {
+    const admin = await requireUser(req, res, Role.ADMIN);
+    if (!admin) return;
+
+    const branchId = optionalFilterId(req.query.branchId, 'Sede');
+    const branchWhere = branchId === 'all' ? {} : { branchId };
+    const now = new Date();
+    const activeOrderStatuses = [
+      OrderStatus.QUEUED,
+      OrderStatus.PRE_WASH,
+      OrderStatus.WASHING,
+      OrderStatus.DRYING,
+      OrderStatus.PREPARING,
+      OrderStatus.READY,
+      OrderStatus.OUT_FOR_DELIVERY,
+    ];
+
+    const [orders, reservations, blockedMachines, activeClients] = await Promise.all([
+      prisma.laundryOrder.count({
+        where: {
+          ...branchWhere,
+          status: { in: activeOrderStatuses },
+        },
+      }),
+      prisma.reservation.count({
+        where: {
+          ...branchWhere,
+          status: { in: [ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED] },
+          scheduledEnd: { gt: now },
+        },
+      }),
+      prisma.machineSlot.count({
+        where: {
+          ...branchWhere,
+          type: MachineSlotType.ADMIN_BLOCK,
+          scheduledEnd: { gt: now },
+        },
+      }),
+      prisma.user.count({
+        where: {
+          role: Role.CLIENT,
+          isActive: true,
+          OR: [
+            {
+              laundryOrders: {
+                some: {
+                  ...branchWhere,
+                  status: { in: activeOrderStatuses },
+                },
+              },
+            },
+            {
+              reservations: {
+                some: {
+                  ...branchWhere,
+                  status: { in: [ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED] },
+                  scheduledEnd: { gt: now },
+                },
+              },
+            },
+          ],
+        },
+      }),
+    ]);
+
+    return res.json({
+      metrics: {
+        activeOrders: orders,
+        activeReservations: reservations,
+        blockedMachines,
+        activeClients,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/reservations/availability', async (req, res) => {
   try {
     const branchId = safeId(req.query.branchId, 'Sede');
