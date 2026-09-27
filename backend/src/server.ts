@@ -202,7 +202,9 @@ app.use((req, res, next) => {
 });
 app.use(apiLimiter);
 app.use(mutationGuard(allowedOrigins));
-app.use('/api/auth', authLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/admin/login', authLimiter);
 app.use('/api/payments/wompi/checkout', paymentLimiter);
 app.use('/api/payments/wompi/webhook', webhookLimiter);
 app.use('/api/admin/orders/:orderId/evidence', uploadLimiter, uploadConcurrency);
