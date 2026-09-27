@@ -135,9 +135,9 @@ function imageKind(file: Express.Multer.File) {
   return undefined;
 }
 
-async function evidenceDto(photo: any) {
+async function evidenceDto(photo: any, includeSignedUrl = false) {
   let url: string | undefined;
-  if (typeof photo.imageUrl === 'string' && photo.imageUrl.startsWith('evidence/')) {
+  if (includeSignedUrl && typeof photo.imageUrl === 'string' && photo.imageUrl.startsWith('evidence/')) {
     try {
       url = await signedEvidenceUrl(photo.imageUrl);
     } catch (error) {
@@ -155,7 +155,7 @@ async function evidenceDto(photo: any) {
 }
 
 async function orderDto(order: any, includeInternal: boolean) {
-  const evidence = await Promise.all((order.evidencePhotos ?? []).map(evidenceDto));
+  const evidence = await Promise.all((order.evidencePhotos ?? []).map((photo: any) => evidenceDto(photo, false)));
   return {
     id: order.id,
     branchId: order.branchId,
@@ -232,6 +232,30 @@ export function registerAssistedRoutes(
         take: 100,
       });
       return res.json({ orders: await Promise.all(orders.map((order) => orderDto(order, false))) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/client/orders/:orderId/evidence', async (req, res, next) => {
+    try {
+      const user = await requireUser(req, res, Role.CLIENT);
+      if (!user) return;
+      const orderId = String(req.params.orderId ?? '').trim();
+      if (!orderId || orderId.length > 191) return res.status(400).json({ message: 'Orden inválida.' });
+
+      const order = await prisma.laundryOrder.findFirst({
+        where: { id: orderId, clientId: user.id },
+        select: {
+          id: true,
+          evidencePhotos: { orderBy: { createdAt: 'asc' } },
+        },
+      });
+      if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
+
+      return res.json({
+        evidence: await Promise.all(order.evidencePhotos.map((photo) => evidenceDto(photo, true))),
+      });
     } catch (error) {
       next(error);
     }
@@ -658,7 +682,7 @@ export function registerAssistedRoutes(
       queueClientNotification(prisma, order.clientId, 'Nueva evidencia de tu servicio', description || 'Agregamos fotos de evidencia a tu orden.', {
         type: 'ORDER_EVIDENCE', orderId, url: '/client/assisted',
       });
-      return res.status(201).json({ evidence: await Promise.all(records.map(evidenceDto)) });
+      return res.status(201).json({ evidence: await Promise.all(records.map((photo) => evidenceDto(photo, false))) });
     } catch (error: any) {
       await Promise.all(uploadedPaths.map((path) => deleteEvidenceImage(path).catch(() => undefined)));
       if (error?.message?.includes('tipo real')) return res.status(400).json({ message: error.message });
