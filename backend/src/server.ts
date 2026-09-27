@@ -32,6 +32,7 @@ import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
 import { registerIdempotentClientServiceRoutes } from './client-services.js';
 import { businessDaySchedule } from './business-calendar.js';
+import { isoDate, optionalFilterId, safeId, timeSlot } from './validation.js';
 
 assertProductionSecrets();
 
@@ -63,6 +64,13 @@ const prisma = new PrismaClient({
   },
 });
 const app = express();
+
+app.use((req, res, next) => {
+  if (req.originalUrl.length > 4096) {
+    return res.status(414).json({ message: 'La URL de la solicitud es demasiado larga.' });
+  }
+  next();
+});
 
 function concurrencyGuard(maxConcurrent: number, label: string) {
   let active = 0;
@@ -247,9 +255,8 @@ function parseSlot(date: string, slot: string) {
 }
 
 function businessDate(date: string) {
-  const parsed = new Date(`${date}T12:00:00-05:00`);
-  if (Number.isNaN(parsed.getTime())) throw new Error('Fecha inválida');
-  return parsed;
+  const clean = isoDate(date);
+  return new Date(`${clean}T12:00:00-05:00`);
 }
 
 async function validateReservationSlot(date: string, slot: string) {
@@ -360,8 +367,7 @@ app.get('/api/ready', async (_req, res) => {
 
 app.get('/api/calendar/day', async (req, res) => {
   try {
-    const date = String(req.query.date ?? '');
-    if (!date) return res.status(400).json({ message: 'La fecha es obligatoria.' });
+    const date = isoDate(req.query.date);
     return res.json(await businessDaySchedule(prisma, date));
   } catch (error: any) {
     return res.status(400).json({ message: error?.message ?? 'No se pudo consultar el horario del día.' });
@@ -390,10 +396,9 @@ app.get('/api/branches', async (_req, res, next) => {
 
 app.get('/api/reservations/availability', async (req, res) => {
   try {
-    const branchId = String(req.query.branchId ?? '');
-    const date = String(req.query.date ?? '');
-    const slot = String(req.query.slot ?? '');
-    if (!branchId || !date || !slot) return res.status(400).json({ message: 'Sede, fecha y franja son obligatorias.' });
+    const branchId = safeId(req.query.branchId, 'Sede');
+    const date = isoDate(req.query.date);
+    const slot = timeSlot(req.query.slot);
 
     const branch = await prisma.branch.findUnique({
       where: { id: branchId },
@@ -436,9 +441,9 @@ app.get('/api/admin/reservations', async (req, res, next) => {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
 
-    const branchId = String(req.query.branchId ?? 'all');
-    const machineId = String(req.query.machineId ?? 'all');
-    const date = String(req.query.date ?? '');
+    const branchId = optionalFilterId(req.query.branchId, 'Sede');
+    const machineId = optionalFilterId(req.query.machineId, 'Máquina');
+    const date = req.query.date ? isoDate(req.query.date) : '';
     if (date) businessDate(date);
     const startOfDay = date ? new Date(`${date}T00:00:00-05:00`) : undefined;
     const endOfDay = date ? new Date(`${date}T23:59:59.999-05:00`) : undefined;
@@ -473,8 +478,8 @@ app.get('/api/admin/machine-blocks', async (req, res, next) => {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
 
-    const branchId = String(req.query.branchId ?? 'all');
-    const date = String(req.query.date ?? '');
+    const branchId = optionalFilterId(req.query.branchId, 'Sede');
+    const date = req.query.date ? isoDate(req.query.date) : '';
     if (date) businessDate(date);
     const startOfDay = date ? new Date(`${date}T00:00:00-05:00`) : undefined;
     const endOfDay = date ? new Date(`${date}T23:59:59.999-05:00`) : undefined;
@@ -502,14 +507,11 @@ app.post('/api/admin/machine-blocks', async (req, res) => {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
 
-    const branchId = String(req.body?.branchId ?? '');
-    const machineId = String(req.body?.machineId ?? '');
-    const date = String(req.body?.date ?? '');
-    const slot = String(req.body?.slot ?? '');
+    const branchId = safeId(req.body?.branchId, 'Sede');
+    const machineId = safeId(req.body?.machineId, 'Máquina');
+    const date = isoDate(req.body?.date);
+    const slot = timeSlot(req.body?.slot);
     const reason = String(req.body?.reason ?? 'Uso interno de la sede').trim().slice(0, 300);
-    if (!branchId || !machineId || !date || !slot) {
-      return res.status(400).json({ message: 'Sede, máquina, fecha y franja son obligatorias.' });
-    }
 
     const { scheduledStart, scheduledEnd } = await validateReservationSlot(date, slot);
     const machine = await prisma.machine.findFirst({
@@ -554,7 +556,7 @@ app.delete('/api/admin/machine-blocks/:blockId', async (req, res, next) => {
   try {
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
-    const blockId = String(req.params.blockId);
+    const blockId = safeId(req.params.blockId, 'Bloqueo');
     const block = await prisma.machineSlot.findFirst({ where: { id: blockId, type: MachineSlotType.ADMIN_BLOCK } });
     if (!block) return res.status(404).json({ message: 'Bloqueo no encontrado.' });
 
