@@ -80,12 +80,16 @@ export default function AssistedPage() {
   useEffect(() => {
     void registerPushNotifications().catch(() => undefined);
     void loadOrders();
-    const timer = window.setInterval(() => void loadOrders(), 20000);
-    const onFocus = () => void loadOrders();
-    window.addEventListener('focus', onFocus);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadOrders();
+    };
+    const timer = window.setInterval(refreshIfVisible, 60_000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
     };
   }, [loadOrders]);
 
