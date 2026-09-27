@@ -686,7 +686,7 @@ app.use('/api', (_req, res) => {
 
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (isProduction) {
-    req.log?.error({ err: { name: err?.name, code: err?.code, message: err?.message } }, 'Error de API');
+    console.error('Error de API', { name: err?.name, code: err?.code, message: err?.message });
   } else {
     console.error(err);
   }
