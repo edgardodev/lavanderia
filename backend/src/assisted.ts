@@ -76,14 +76,14 @@ async function notifyClient(
   body: string,
   data: Record<string, string>,
 ) {
-  const tokenRows = await prisma.pushToken.findMany({
-    where: { userId },
-    select: { token: true },
-  });
-  const tokens = tokenRows.map((row) => row.token);
-  if (tokens.length === 0) return { sent: 0 };
-
   try {
+    const tokenRows = await prisma.pushToken.findMany({
+      where: { userId },
+      select: { token: true },
+    });
+    const tokens = tokenRows.map((row) => row.token);
+    if (tokens.length === 0) return { sent: 0 };
+
     const result = await sendPush(tokens, title, body, data);
     if (result.invalidTokens.length) {
       await prisma.pushToken.deleteMany({
@@ -95,6 +95,16 @@ async function notifyClient(
     console.error('No se pudo enviar push FCM', error);
     return { sent: 0 };
   }
+}
+
+function queueClientNotification(
+  prisma: PrismaClient,
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>,
+) {
+  void notifyClient(prisma, userId, title, body, data);
 }
 
 function imageKind(file: Express.Multer.File) {
@@ -428,7 +438,7 @@ export function registerAssistedRoutes(
         return order;
       });
 
-      const push = await notifyClient(
+      queueClientNotification(
         prisma,
         existing.clientId,
         'Valor del servicio confirmado',
@@ -436,7 +446,7 @@ export function registerAssistedRoutes(
         { type: 'ORDER_PRICING', orderId, url: '/client/assisted' },
       );
 
-      return res.json({ order: await orderDto(updated, true), notificationSent: push.sent > 0 });
+      return res.json({ order: await orderDto(updated, true), notificationQueued: true });
     } catch (error: any) {
       if (error instanceof Error && (
         error.message.startsWith('Debes ingresar')
@@ -495,13 +505,13 @@ export function registerAssistedRoutes(
         return updated;
       });
 
-      const push = await notifyClient(prisma, existing.clientId, copy.title, copy.body, {
+      queueClientNotification(prisma, existing.clientId, copy.title, copy.body, {
         type: 'ORDER_STATUS',
         orderId,
         status: nextStatus,
         url: '/client/assisted',
       });
-      return res.json({ order: await orderDto(order, true), notificationSent: push.sent > 0 });
+      return res.json({ order: await orderDto(order, true), notificationQueued: true });
     } catch (error) {
       next(error);
     }
@@ -531,7 +541,7 @@ export function registerAssistedRoutes(
         },
       });
       if (!isInternal) {
-        await notifyClient(prisma, order.clientId, 'Mensaje sobre tu servicio', message.slice(0, 180), {
+        queueClientNotification(prisma, order.clientId, 'Mensaje sobre tu servicio', message.slice(0, 180), {
           type: 'ORDER_MESSAGE', orderId, url: '/client/assisted',
         });
       }
@@ -645,7 +655,7 @@ export function registerAssistedRoutes(
         return created;
       });
 
-      await notifyClient(prisma, order.clientId, 'Nueva evidencia de tu servicio', description || 'Agregamos fotos de evidencia a tu orden.', {
+      queueClientNotification(prisma, order.clientId, 'Nueva evidencia de tu servicio', description || 'Agregamos fotos de evidencia a tu orden.', {
         type: 'ORDER_EVIDENCE', orderId, url: '/client/assisted',
       });
       return res.status(201).json({ evidence: await Promise.all(records.map(evidenceDto)) });
