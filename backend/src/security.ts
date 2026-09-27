@@ -61,7 +61,6 @@ function isSessionlessMutation(path: string) {
   return path.endsWith('/auth/login')
     || path.endsWith('/auth/register')
     || path.endsWith('/auth/admin/login')
-    || path.includes('/auth/admin/security/')
     || path.endsWith('/payments/wompi/webhook');
 }
 
@@ -77,7 +76,8 @@ export function mutationGuard(allowedOrigins: Set<string>) {
     if (isSessionlessMutation(req.path)) return next();
 
     const authCookie = String(req.cookies?.auth_token ?? '');
-    if (!authCookie) return next();
+    const adminPreauthCookie = String(req.cookies?.admin_preauth ?? '');
+    if (!authCookie && !adminPreauthCookie) return next();
 
     const cookieToken = String(req.cookies?.csrf_token ?? '');
     const headerToken = String(req.get('X-CSRF-Token') ?? '');
