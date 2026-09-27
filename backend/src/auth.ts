@@ -11,6 +11,7 @@ import type { Express, Request, Response } from 'express';
 import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { Prisma, PrismaClient, Role } from '@prisma/client';
+import { safeId } from './validation.js';
 
 const CLIENT_SESSION_HOURS = 8;
 const DEFAULT_ADMIN_SESSION_HOURS = 10;
@@ -747,7 +748,7 @@ export function registerAuthRoutes(
     const admin = await requireUser(req, res, Role.ADMIN);
     if (!admin) return;
     if (!admin.canManageAdmins) return res.status(403).json({ message: 'No tienes permiso para administrar accesos.' });
-    const userId = String(req.params.userId);
+    const userId = safeId(req.params.userId, 'Administrador');
     if (userId === admin.id && req.body?.isActive === false) {
       return res.status(400).json({ message: 'No puedes desactivar tu propia cuenta desde esta sesión.' });
     }
