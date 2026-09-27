@@ -32,7 +32,7 @@ import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
 import { registerIdempotentClientServiceRoutes } from './client-services.js';
 import { businessDaySchedule } from './business-calendar.js';
-import { isoDate, optionalFilterId, safeId, timeSlot } from './validation.js';
+import { isoDate, optionalFilterId, RequestValidationError, safeId, timeSlot } from './validation.js';
 
 assertProductionSecrets();
 
@@ -612,6 +612,9 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
     console.error(err);
   }
   if (res.headersSent) return;
+  if (err instanceof RequestValidationError) {
+    return res.status(400).json({ message: err.message });
+  }
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ message: 'La carga de archivos supera los límites permitidos.' });
   }
