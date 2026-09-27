@@ -10,7 +10,7 @@ import {
 import type { Express, Request, Response } from 'express';
 import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
-import { PrismaClient, Role } from '@prisma/client';
+import { Prisma, PrismaClient, Role } from '@prisma/client';
 
 const CLIENT_SESSION_HOURS = 8;
 const DEFAULT_ADMIN_SESSION_HOURS = 10;
@@ -20,6 +20,13 @@ const CLIENT_LOCK_MINUTES = 15;
 const ADMIN_LOCK_MINUTES = 30;
 const POLICY_VERSION = process.env.PRIVACY_POLICY_VERSION ?? '2026-09-15';
 const TERMS_VERSION = process.env.TERMS_VERSION ?? '2026-09-15';
+const ARGON2_OPTIONS = {
+  type: argon2.argon2id,
+  memoryCost: 65_536,
+  timeCost: 3,
+  parallelism: 1,
+} as const;
+let dummyPasswordHashPromise: Promise<string> | undefined;
 
 const PRIVACY_AUTHORIZATION_TEXT =
   'Autorizo el tratamiento de mis datos personales para crear y administrar mi cuenta, gestionar reservas, pagos, domicilios, soporte, notificaciones operativas y cumplimiento legal, de acuerdo con la política de tratamiento de datos personales.';
@@ -199,6 +206,13 @@ function hashText(text: string) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+function dummyPasswordHash() {
+  if (!dummyPasswordHashPromise) {
+    dummyPasswordHashPromise = argon2.hash(randomBytes(32).toString('base64url'), ARGON2_OPTIONS);
+  }
+  return dummyPasswordHashPromise;
+}
+
 function mfaEncryptionKey() {
   const raw = process.env.MFA_ENCRYPTION_KEY ?? '';
   if (raw) {
@@ -293,23 +307,26 @@ function generateRecoveryCodes() {
 }
 
 async function registerFailure(prisma: PrismaClient, userId: string, admin: boolean) {
-  const current = await prisma.user.findUnique({ where: { id: userId }, select: { failedLoginAttempts: true } });
-  if (!current) return;
-  const attempts = current.failedLoginAttempts + 1;
   const lockMinutes = admin ? ADMIN_LOCK_MINUTES : CLIENT_LOCK_MINUTES;
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      failedLoginAttempts: attempts >= MAX_FAILED_ATTEMPTS ? 0 : attempts,
-      lockedUntil: attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + lockMinutes * 60_000) : undefined,
-    },
-  });
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.user.findUnique({ where: { id: userId }, select: { failedLoginAttempts: true } });
+    if (!current) return;
+    const attempts = current.failedLoginAttempts + 1;
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        failedLoginAttempts: attempts >= MAX_FAILED_ATTEMPTS ? 0 : attempts,
+        lockedUntil: attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + lockMinutes * 60_000) : undefined,
+      },
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 async function verifyPasswordLogin(prisma: PrismaClient, email: string, password: string, role: Role) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || user.role !== role || !user.isActive) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const dummyHash = await dummyPasswordHash();
+    await argon2.verify(dummyHash, password).catch(() => false);
     return undefined;
   }
   if (user.lockedUntil && user.lockedUntil > new Date()) return undefined;
@@ -322,15 +339,20 @@ async function verifyPasswordLogin(prisma: PrismaClient, email: string, password
   return user;
 }
 
-async function consumeRecoveryCode(prisma: PrismaClient, userId: string, otp: string, hashes: unknown) {
-  if (!Array.isArray(hashes)) return false;
+async function consumeRecoveryCode(prisma: PrismaClient, userId: string, otp: string, _hashes: unknown) {
   const target = recoveryHash(otp);
-  const values = hashes.filter((item): item is string => typeof item === 'string');
-  const index = values.findIndex((hash) => safeTextEqual(hash, target));
-  if (index < 0) return false;
-  const next = values.filter((_, position) => position !== index);
-  await prisma.user.update({ where: { id: userId }, data: { mfaRecoveryHashes: next } });
-  return true;
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.user.findUnique({ where: { id: userId }, select: { mfaRecoveryHashes: true } });
+    if (!current || !Array.isArray(current.mfaRecoveryHashes)) return false;
+
+    const values = current.mfaRecoveryHashes.filter((item): item is string => typeof item === 'string');
+    const index = values.findIndex((hash) => safeTextEqual(hash, target));
+    if (index < 0) return false;
+
+    const next = values.filter((_, position) => position !== index);
+    await tx.user.update({ where: { id: userId }, data: { mfaRecoveryHashes: next } });
+    return true;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 async function verifyAdminSecondFactor(prisma: PrismaClient, user: {
@@ -392,7 +414,7 @@ export function registerAuthRoutes(
       const invalidPassword = passwordError(password, { email, name });
       if (invalidPassword) return res.status(400).json({ message: invalidPassword });
 
-      const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+      const passwordHash = await argon2.hash(password, ARGON2_OPTIONS);
       const userAgent = String(req.get('user-agent') ?? '').slice(0, 300) || undefined;
 
       const user = await prisma.$transaction(async (tx) => {
@@ -538,7 +560,7 @@ export function registerAuthRoutes(
     const reused = await argon2.verify(user.passwordHash, newPassword).catch(() => false);
     if (reused) return res.status(400).json({ message: 'La nueva contraseña debe ser diferente a la actual.' });
 
-    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(newPassword, ARGON2_OPTIONS);
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -692,7 +714,7 @@ export function registerAuthRoutes(
     }
 
     const temporaryPassword = `A!9a${randomBytes(14).toString('base64url')}`;
-    const passwordHash = await argon2.hash(temporaryPassword, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(temporaryPassword, ARGON2_OPTIONS);
     try {
       const created = await prisma.user.create({
         data: {
