@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
@@ -18,22 +18,35 @@ function branchName(branchId?: string) {
 export default function AdminClientsPage() {
   const [clients, setClients] = useState<AdminClientSummary[]>([]);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'history'>('all');
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ clients: AdminClientSummary[] }>('/admin/clients');
+      const params = new URLSearchParams({ limit: '100' });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      if (statusFilter !== 'all') params.set('view', statusFilter);
+
+      const data = await apiFetch<{ clients: AdminClientSummary[]; truncated?: boolean }>(`/admin/clients?${params.toString()}`);
       setClients(data.clients);
+      setTruncated(Boolean(data.truncated));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los clientes.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch, branchFilter, statusFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     void load();
@@ -45,17 +58,6 @@ export default function AdminClientsPage() {
       window.removeEventListener('focus', onFocus);
     };
   }, [load]);
-
-  const filteredClients = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
-    return clients.filter((client) => {
-      const matchesSearch = !normalized || `${client.name} ${client.email} ${client.phone ?? ''}`.toLowerCase().includes(normalized);
-      const matchesBranch = branchFilter === 'all' || client.activeOrders.some((order) => order.branchId === branchFilter);
-      const matchesStatus = statusFilter === 'all'
-        || (statusFilter === 'active' ? client.activeAssistedCount > 0 : client.assistedCount > 0);
-      return matchesSearch && matchesBranch && matchesStatus;
-    });
-  }, [clients, search, branchFilter, statusFilter]);
 
   return (
     <>
@@ -86,12 +88,13 @@ export default function AdminClientsPage() {
             </Field>
           </div>
           {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</p>}
+          {truncated && <p className="text-xs font-bold text-amber-700">Hay más resultados. Usa la búsqueda o los filtros para acotar la lista.</p>}
         </Card>
 
         {loading && <Card><p className="text-center font-bold text-slate-500">Cargando clientes...</p></Card>}
 
         <section className="grid gap-4">
-          {filteredClients.map((client) => (
+          {clients.map((client) => (
             <Card key={client.id} className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
               <div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -130,7 +133,7 @@ export default function AdminClientsPage() {
               </div>
             </Card>
           ))}
-          {!loading && filteredClients.length === 0 && <Card><p className="text-center font-bold text-slate-500">No hay clientes con esos filtros.</p></Card>}
+          {!loading && clients.length === 0 && <Card><p className="text-center font-bold text-slate-500">No hay clientes con esos filtros.</p></Card>}
         </section>
       </main>
     </>
