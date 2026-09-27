@@ -124,12 +124,16 @@ export default function SelfServicePage() {
 
   useEffect(() => {
     void loadReservations();
-    const timer = window.setInterval(() => void loadReservations(), 20000);
-    const onFocus = () => void loadReservations();
-    window.addEventListener("focus", onFocus);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void loadReservations();
+    };
+    const timer = window.setInterval(refreshIfVisible, 60_000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [loadReservations]);
 
@@ -162,12 +166,16 @@ export default function SelfServicePage() {
     void loadAvailability();
     if (!draft.branchId || !draft.date || !draft.slot) return;
 
-    const timer = window.setInterval(() => void loadAvailability(), 15000);
-    const onFocus = () => void loadAvailability();
-    window.addEventListener("focus", onFocus);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void loadAvailability();
+    };
+    const timer = window.setInterval(refreshIfVisible, 20_000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [draft.branchId, draft.date, draft.slot, loadAvailability]);
 
