@@ -125,11 +125,13 @@ function issueSession(res: Response, user: { id: string; role: Role; sessionVers
 }
 
 function issueAdminPreauth(res: Response, user: { id: string; sessionVersion: number }) {
+  const maxAge = ADMIN_PREAUTH_MINUTES * 60 * 1000;
   res.cookie(
     'admin_preauth',
     signAdminPreauth(user),
-    authCookieOptions(ADMIN_PREAUTH_MINUTES * 60 * 1000),
+    authCookieOptions(maxAge),
   );
+  res.cookie('csrf_token', nanoid(32), csrfCookieOptions(maxAge));
 }
 
 export function readSession(req: Request): SessionPayload | undefined {
