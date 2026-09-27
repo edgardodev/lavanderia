@@ -7,6 +7,7 @@ import {
   getWompiConfig,
   verifyWompiEvent,
 } from './wompi.js';
+import { safeId } from './validation.js';
 
 type AuthenticatedUser = {
   id: string;
@@ -23,6 +24,11 @@ type RequireUser = (
 ) => Promise<AuthenticatedUser | undefined>;
 
 type ResourceType = 'reservation' | 'order';
+
+function publicErrorMessage(error: unknown, fallback: string) {
+  if (process.env.NODE_ENV === 'production') return fallback;
+  return error instanceof Error ? error.message : fallback;
+}
 
 const FINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.APPROVED,
@@ -228,10 +234,10 @@ export function registerWompiPaymentRoutes(
       await releaseExpiredWompiCheckouts(prisma);
 
       const type = String(req.body?.type ?? '') as ResourceType;
-      const id = String(req.body?.id ?? '').trim();
-      if (!['reservation', 'order'].includes(type) || !id) {
+      if (!['reservation', 'order'].includes(type)) {
         return res.status(400).json({ message: 'Pago inválido.' });
       }
+      const id = safeId(req.body?.id, 'Servicio');
 
       const resource = await ownedResource(prisma, type, id, user.id);
       if (!resource) return res.status(404).json({ message: 'Servicio no encontrado.' });
@@ -355,7 +361,8 @@ export function registerWompiPaymentRoutes(
 
       return res.json({ checkout: buildCheckout(payment, user) });
     } catch (error: any) {
-      return res.status(503).json({ message: error?.message ?? 'Wompi no está configurado correctamente.' });
+      console.error('No se pudo preparar checkout Wompi', error);
+      return res.status(503).json({ message: publicErrorMessage(error, 'No se pudo preparar el pago en este momento.') });
     }
   });
 
@@ -365,8 +372,8 @@ export function registerWompiPaymentRoutes(
       if (!user) return;
 
       const type = String(req.params.type) as ResourceType;
-      const id = String(req.params.id);
       if (!['reservation', 'order'].includes(type)) return res.status(400).json({ message: 'Tipo de pago inválido.' });
+      const id = safeId(req.params.id, 'Servicio');
       const resource = await ownedResource(prisma, type, id, user.id);
       if (!resource) return res.status(404).json({ message: 'Servicio no encontrado.' });
 
@@ -387,7 +394,8 @@ export function registerWompiPaymentRoutes(
         resourceStatus: resource.status,
       });
     } catch (error: any) {
-      return res.status(500).json({ message: error?.message ?? 'No se pudo consultar el pago.' });
+      console.error('No se pudo consultar estado de pago', error);
+      return res.status(500).json({ message: publicErrorMessage(error, 'No se pudo consultar el pago.') });
     }
   });
 
@@ -445,9 +453,19 @@ export function registerWompiPaymentRoutes(
       }
 
       await prisma.$transaction(async (tx) => {
-        const processedAt = FINAL_PAYMENT_STATUSES.has(status) ? new Date() : null;
-        await tx.payment.update({
+        const currentPayment = await tx.payment.findUnique({
           where: { id: payment.id },
+          select: { status: true, rawResponse: true },
+        });
+        if (!currentPayment) return;
+
+        const lateApproval = status === PaymentStatus.APPROVED && isLocallyExpiredPayment(currentPayment);
+        if (FINAL_PAYMENT_STATUSES.has(currentPayment.status) && !lateApproval) return;
+        if (status === PaymentStatus.PENDING && currentPayment.status !== PaymentStatus.PENDING) return;
+
+        const processedAt = FINAL_PAYMENT_STATUSES.has(status) ? new Date() : null;
+        const claimed = await tx.payment.updateMany({
+          where: { id: payment.id, status: currentPayment.status },
           data: {
             status,
             wompiTransactionId: transactionId,
@@ -455,6 +473,7 @@ export function registerWompiPaymentRoutes(
             processedAt,
           },
         });
+        if (claimed.count !== 1) return;
 
         let appliedToResource = false;
         let requiresManualReview = false;
