@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
 import { AdminStatusActions } from '@/components/AdminStatusActions';
@@ -24,20 +24,39 @@ export default function AdminOrdersPage() {
   const [branchFilter, setBranchFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ orders: LaundryOrder[] }>('/admin/orders');
+      const params = new URLSearchParams({ limit: '100' });
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (debouncedSearch) params.set('search', debouncedSearch);
+
+      const data = await apiFetch<{ orders: LaundryOrder[]; truncated?: boolean }>(`/admin/orders?${params.toString()}`);
       setOrders(data.orders);
+      setTruncated(Boolean(data.truncated));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar las órdenes.');
     } finally {
       setLoading(false);
     }
+  }, [branchFilter, statusFilter, debouncedSearch]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const client = params.get('client');
+    if (client) setSearch(client.slice(0, 120));
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     void load();
@@ -49,17 +68,6 @@ export default function AdminOrdersPage() {
       window.removeEventListener('focus', onFocus);
     };
   }, [load]);
-
-  const filteredOrders = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
-    return orders.filter((order) => {
-      const matchesBranch = branchFilter === 'all' || order.branchId === branchFilter;
-      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-      const clientText = `${order.client?.name ?? ''} ${order.client?.email ?? ''} ${order.client?.phone ?? ''}`.toLowerCase();
-      const matchesSearch = !normalized || clientText.includes(normalized);
-      return matchesBranch && matchesStatus && matchesSearch;
-    });
-  }, [orders, branchFilter, statusFilter, search]);
 
   return (
     <>
@@ -89,12 +97,13 @@ export default function AdminOrdersPage() {
             </Field>
           </div>
           {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</p>}
+          {truncated && <p className="text-xs font-bold text-amber-700">Hay más resultados. Usa sede, estado o búsqueda para acotar la consulta.</p>}
         </Card>
 
         {loading && <Card><p className="text-center font-bold text-slate-500">Cargando órdenes...</p></Card>}
 
         <section className="grid gap-5">
-          {filteredOrders.map((order) => (
+          {orders.map((order) => (
             <Card key={order.id}>
               <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
                 <div>
@@ -160,7 +169,7 @@ export default function AdminOrdersPage() {
               </div>
             </Card>
           ))}
-          {!loading && filteredOrders.length === 0 && <Card><p className="text-center font-bold text-slate-500">No hay órdenes con estos filtros.</p></Card>}
+          {!loading && orders.length === 0 && <Card><p className="text-center font-bold text-slate-500">No hay órdenes con estos filtros.</p></Card>}
         </section>
       </main>
     </>
