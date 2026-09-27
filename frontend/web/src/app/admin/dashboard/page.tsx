@@ -17,6 +17,13 @@ type Availability = {
   unavailableMachineIds: string[];
 };
 
+type DashboardMetrics = {
+  activeOrders: number;
+  activeReservations: number;
+  blockedMachines: number;
+  activeClients: number;
+};
+
 type DaySchedule = {
   date: string;
   isSunday: boolean;
@@ -43,6 +50,12 @@ export default function AdminDashboardPage() {
   const [branches, setBranches] = useState<Branch[]>(branchSeed);
   const [branchFilter, setBranchFilter] = useState('all');
   const [orders, setOrders] = useState<LaundryOrder[]>([]);
+  const [metricsSummary, setMetricsSummary] = useState<DashboardMetrics>({
+    activeOrders: 0,
+    activeReservations: 0,
+    blockedMachines: 0,
+    activeClients: 0,
+  });
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
   const [reservedMachineIds, setReservedMachineIds] = useState<string[]>([]);
@@ -70,38 +83,58 @@ export default function AdminDashboardPage() {
 
   const loadOrders = useCallback(async () => {
     try {
-      const data = await apiFetch<{ orders: LaundryOrder[] }>('/admin/orders');
+      const params = new URLSearchParams({ limit: '6' });
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      const data = await apiFetch<{ orders: LaundryOrder[] }>(`/admin/orders?${params.toString()}`);
       setOrders(data.orders);
     } catch (error) {
       setOrders([]);
       recordLoadError(error);
     }
-  }, [recordLoadError]);
+  }, [branchFilter, recordLoadError]);
 
   const loadBlocks = useCallback(async () => {
     try {
-      const data = await apiFetch<{ blocks: BlockedSlot[] }>('/admin/machine-blocks');
+      const params = new URLSearchParams();
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      const suffix = params.size ? `?${params.toString()}` : '';
+      const data = await apiFetch<{ blocks: BlockedSlot[] }>(`/admin/machine-blocks${suffix}`);
       setBlockedSlots(data.blocks);
     } catch (error) {
       setBlockedSlots([]);
       recordLoadError(error);
     }
-  }, [recordLoadError]);
+  }, [branchFilter, recordLoadError]);
 
   const loadReservations = useCallback(async () => {
     try {
-      const data = await apiFetch<{ reservations: Reservation[] }>('/admin/reservations');
+      const params = new URLSearchParams({ date: machineBoardDate });
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      const data = await apiFetch<{ reservations: Reservation[] }>(`/admin/reservations?${params.toString()}`);
       setReservations(data.reservations);
     } catch (error) {
       setReservations([]);
       recordLoadError(error);
     }
-  }, [recordLoadError]);
+  }, [branchFilter, machineBoardDate, recordLoadError]);
+
+  const loadSummary = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (branchFilter !== 'all') params.set('branchId', branchFilter);
+      const suffix = params.size ? `?${params.toString()}` : '';
+      const data = await apiFetch<{ metrics: DashboardMetrics }>(`/admin/dashboard-summary${suffix}`);
+      setMetricsSummary(data.metrics);
+    } catch (error) {
+      setMetricsSummary({ activeOrders: 0, activeReservations: 0, blockedMachines: 0, activeClients: 0 });
+      recordLoadError(error);
+    }
+  }, [branchFilter, recordLoadError]);
 
   const refreshOperationalData = useCallback(async () => {
     setLoadError('');
-    await Promise.all([loadOrders(), loadReservations(), loadBlocks()]);
-  }, [loadBlocks, loadOrders, loadReservations]);
+    await Promise.all([loadOrders(), loadReservations(), loadBlocks(), loadSummary()]);
+  }, [loadBlocks, loadOrders, loadReservations, loadSummary]);
 
   useEffect(() => {
     apiFetch<{ branches: Branch[] }>('/branches')
@@ -118,9 +151,11 @@ export default function AdminDashboardPage() {
         });
       })
       .catch(recordLoadError);
+  }, [recordLoadError]);
 
+  useEffect(() => {
     void refreshOperationalData();
-  }, [recordLoadError, refreshOperationalData]);
+  }, [refreshOperationalData]);
 
   useEffect(() => {
     const refresh = () => void refreshOperationalData();
@@ -265,16 +300,10 @@ export default function AdminDashboardPage() {
   }, [loadBlockAvailability]);
 
   const metrics = [
-    { label: 'Órdenes asistidas', value: filteredOrders.length, icon: Shirt },
-    { label: 'Reservas autoservicio', value: filteredReservations.length, icon: CalendarClock },
-    { label: 'Máquinas bloqueadas', value: filteredBlocked.length, icon: WashingMachine },
-    {
-      label: 'Clientes activos',
-      value: new Set(
-        [...orders.map((order) => order.client?.email), ...reservations.map((reservation) => reservation.client?.email)].filter(Boolean),
-      ).size,
-      icon: UsersRound,
-    },
+    { label: 'Órdenes activas', value: metricsSummary.activeOrders, icon: Shirt },
+    { label: 'Reservas activas', value: metricsSummary.activeReservations, icon: CalendarClock },
+    { label: 'Máquinas bloqueadas', value: metricsSummary.blockedMachines, icon: WashingMachine },
+    { label: 'Clientes activos', value: metricsSummary.activeClients, icon: UsersRound },
   ];
 
   function updateBlockForm<K extends keyof typeof blockForm>(key: K, value: (typeof blockForm)[K]) {
@@ -481,7 +510,7 @@ export default function AdminDashboardPage() {
               <CalendarClock className="text-aqua" />
             </div>
             <div className="mt-6 grid gap-3">
-              {filteredReservations.slice(0, 8).map((reservation) => (
+              {reservations.slice(0, 8).map((reservation) => (
                 <div key={reservation.id} className="grid gap-2 rounded-3xl border border-aqua/10 bg-aqua/5 p-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div>
                     <p className="font-black text-slate-950">{branchName(reservation.branchId, branches)} · {reservation.machineCode ?? reservation.machineId}</p>
@@ -490,7 +519,7 @@ export default function AdminDashboardPage() {
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-aqua">{reservation.status ?? 'Reservada'}</span>
                 </div>
               ))}
-              {filteredReservations.length === 0 && <p className="text-sm font-bold text-slate-500">No hay reservas para esta sede.</p>}
+              {reservations.length === 0 && <p className="text-sm font-bold text-slate-500">No hay reservas para esta sede y día.</p>}
             </div>
           </Card>
 
@@ -576,7 +605,7 @@ export default function AdminDashboardPage() {
         <Card>
           <h2 className="text-2xl font-black text-slate-950">Órdenes “Lo hacemos por ti”</h2>
           <div className="mt-6 grid gap-3">
-            {filteredOrders.slice(0, 6).map((order) => (
+            {orders.slice(0, 6).map((order) => (
               <div key={order.id} className="rounded-3xl border border-slate-100 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -587,7 +616,7 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
             ))}
-            {filteredOrders.length === 0 && <p className="text-sm font-bold text-slate-500">No hay órdenes asistidas para esta sede.</p>}
+            {orders.length === 0 && <p className="text-sm font-bold text-slate-500">No hay órdenes asistidas recientes para esta sede.</p>}
           </div>
         </Card>
       </main>
