@@ -11,6 +11,7 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from './auth.js';
 import { businessDaySchedule } from './business-calendar.js';
+import { isoDate, safeId, timeSlot } from './validation.js';
 
 type RequireUser = (
   req: Request,
@@ -152,14 +153,14 @@ export function registerIdempotentClientServiceRoutes(
         return res.status(200).json({ reservation: reservationDto(existing), idempotentReplay: true });
       }
 
-      const branchId = String(req.body?.branchId ?? '');
-      const machineId = String(req.body?.machineId ?? '');
+      const branchId = safeId(req.body?.branchId, 'Sede');
+      const machineId = safeId(req.body?.machineId, 'Máquina');
       const cycleType = req.body?.cycleType as CycleType;
-      const date = String(req.body?.date ?? '');
-      const slot = String(req.body?.slot ?? '');
+      const date = isoDate(req.body?.date);
+      const slot = timeSlot(req.body?.slot);
       const notes = String(req.body?.notes ?? '').trim().slice(0, 500) || undefined;
-      if (!branchId || !machineId || !cycleType || !date || !slot) {
-        return res.status(400).json({ message: 'Faltan datos para crear la reserva.' });
+      if (!cycleType) {
+        return res.status(400).json({ message: 'Falta el tipo de ciclo.' });
       }
       if (!Object.values(CycleType).includes(cycleType)) return res.status(400).json({ message: 'Tipo de ciclo inválido.' });
 
@@ -246,7 +247,7 @@ export function registerIdempotentClientServiceRoutes(
         return res.status(200).json({ order: orderDto(existing), idempotentReplay: true });
       }
 
-      const branchId = String(req.body?.branchId ?? '');
+      const branchId = safeId(req.body?.branchId, 'Sede');
       const cycleType = req.body?.cycleType as CycleType;
       const pickupType = String(req.body?.pickupType ?? 'STORE');
       const address = String(req.body?.address ?? '').trim().slice(0, 250) || undefined;
@@ -254,7 +255,7 @@ export function registerIdempotentClientServiceRoutes(
       const notes = String(req.body?.notes ?? '').trim().slice(0, 500) || undefined;
       const stainService = Boolean(req.body?.stainService);
 
-      if (!branchId || !Object.values(CycleType).includes(cycleType)) {
+      if (!Object.values(CycleType).includes(cycleType)) {
         return res.status(400).json({ message: 'Sede y tipo de ciclo son obligatorios.' });
       }
       if (!['STORE', 'DELIVERY'].includes(pickupType)) return res.status(400).json({ message: 'Tipo de entrega inválido.' });
