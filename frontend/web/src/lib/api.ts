@@ -53,12 +53,23 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Error inesperado' }));
 
-    if (response.status === 401 && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       const pathname = window.location.pathname;
-      if (pathname.startsWith('/admin/')) {
-        window.location.assign(`/login?role=admin&next=${encodeURIComponent(pathname)}&expired=1`);
-      } else if (pathname.startsWith('/client/')) {
-        window.location.assign(`/login?next=${encodeURIComponent(pathname)}&expired=1`);
+
+      if (response.status === 401) {
+        if (pathname.startsWith('/admin/')) {
+          window.location.assign(`/login?role=admin&next=${encodeURIComponent(pathname)}&expired=1`);
+        } else if (pathname.startsWith('/client/')) {
+          window.location.assign(`/login?next=${encodeURIComponent(pathname)}&expired=1`);
+        }
+      }
+
+      if (response.status === 403 && error?.message === 'No tienes permisos para esta acción.') {
+        if (pathname.startsWith('/admin/')) {
+          window.location.assign(`/login?role=admin&next=${encodeURIComponent(pathname)}&wrongRole=1`);
+        } else if (pathname.startsWith('/client/')) {
+          window.location.assign(`/login?next=${encodeURIComponent(pathname)}&wrongRole=1`);
+        }
       }
     }
 
