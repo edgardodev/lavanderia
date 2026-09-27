@@ -6,7 +6,6 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
-import pinoHttp from 'pino-http';
 import {
   CycleType,
   MachineSlotType,
@@ -156,23 +155,29 @@ const doneForYouPrices: Record<CycleType, number> = {
 
 if (isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(pinoHttp({
-  genReqId(req, res) {
-    const incoming = req.headers['x-request-id'];
-    const id = typeof incoming === 'string' && /^[A-Za-z0-9._:-]{8,128}$/.test(incoming)
-      ? incoming
-      : randomUUID();
-    res.setHeader('X-Request-Id', id);
-    return id;
-  },
-  redact: {
-    paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
-    censor: '[REDACTED]',
-  },
-  autoLogging: {
-    ignore: (req) => req.url === '/api/health' || req.url === '/api/ready',
-  },
-}));
+app.use((req, res, next) => {
+  const incoming = req.get('x-request-id');
+  const requestId = incoming && /^[A-Za-z0-9._:-]{8,128}$/.test(incoming)
+    ? incoming
+    : randomUUID();
+  const startedAt = process.hrtime.bigint();
+  res.setHeader('X-Request-Id', requestId);
+
+  res.once('finish', () => {
+    if (req.path === '/api/health' || req.path === '/api/ready') return;
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    console.log(JSON.stringify({
+      event: 'http_request',
+      requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs * 10) / 10,
+    }));
+  });
+
+  next();
+});
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 app.use(cors({
