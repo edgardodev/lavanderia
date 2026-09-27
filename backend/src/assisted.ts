@@ -1,5 +1,5 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
-import { OrderStatus, PaymentStatus, PrismaClient, Role } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma, PrismaClient, Role } from '@prisma/client';
 import {
   deleteEvidenceImage,
   firebaseReady,
@@ -8,6 +8,7 @@ import {
   uploadEvidenceImage,
 } from './firebase.js';
 import type { AuthenticatedUser } from './auth.js';
+import { boundedLimit, boundedQueryText, optionalFilterId, safeId } from './validation.js';
 
 type RequireUser = (
   req: Request,
@@ -241,8 +242,7 @@ export function registerAssistedRoutes(
     try {
       const user = await requireUser(req, res, Role.CLIENT);
       if (!user) return;
-      const orderId = String(req.params.orderId ?? '').trim();
-      if (!orderId || orderId.length > 191) return res.status(400).json({ message: 'Orden inválida.' });
+      const orderId = safeId(req.params.orderId, 'Orden');
 
       const order = await prisma.laundryOrder.findFirst({
         where: { id: orderId, clientId: user.id },
@@ -277,14 +277,45 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
-      const branchId = String(req.query.branchId ?? 'all');
+
+      const branchId = optionalFilterId(req.query.branchId, 'Sede');
+      const rawStatus = String(req.query.status ?? 'all').trim();
+      const search = boundedQueryText(req.query.search, 120);
+      const limit = boundedLimit(req.query.limit, 50, 100);
+      const status = rawStatus === 'all' ? undefined : rawStatus as OrderStatus;
+      if (status && !Object.values(OrderStatus).includes(status)) {
+        return res.status(400).json({ message: 'Estado inválido.' });
+      }
+
+      const where: Prisma.LaundryOrderWhereInput = {
+        ...(branchId !== 'all' ? { branchId } : {}),
+        ...(status ? { status } : {}),
+        ...(search
+          ? {
+              client: {
+                is: {
+                  OR: [
+                    { name: { contains: search } },
+                    { email: { contains: search } },
+                    { phone: { contains: search } },
+                  ],
+                },
+              },
+            }
+          : {}),
+      };
+
       const orders = await prisma.laundryOrder.findMany({
-        where: branchId === 'all' ? undefined : { branchId },
+        where,
         include: orderInclude,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take: limit,
       });
-      return res.json({ orders: await Promise.all(orders.map((order) => orderDto(order, true))) });
+      return res.json({
+        orders: await Promise.all(orders.map((order) => orderDto(order, true))),
+        limit,
+        truncated: orders.length === limit,
+      });
     } catch (error) {
       next(error);
     }
@@ -294,14 +325,52 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
+
+      const search = boundedQueryText(req.query.search, 120);
+      const branchId = optionalFilterId(req.query.branchId, 'Sede');
+      const view = String(req.query.view ?? 'all').trim();
+      const limit = boundedLimit(req.query.limit, 100, 200);
+      if (!['all', 'active', 'history'].includes(view)) {
+        return res.status(400).json({ message: 'Vista inválida.' });
+      }
+
+      const filters: Prisma.UserWhereInput[] = [{ role: Role.CLIENT, isActive: true }];
+      if (search) {
+        filters.push({
+          OR: [
+            { name: { contains: search } },
+            { email: { contains: search } },
+            { phone: { contains: search } },
+          ],
+        });
+      }
+      if (branchId !== 'all') {
+        filters.push({
+          OR: [
+            { laundryOrders: { some: { branchId } } },
+            { reservations: { some: { branchId } } },
+          ],
+        });
+      }
+      if (view === 'active') {
+        filters.push({
+          laundryOrders: {
+            some: { status: { notIn: [OrderStatus.DELIVERED, OrderStatus.CANCELLED] } },
+          },
+        });
+      } else if (view === 'history') {
+        filters.push({ laundryOrders: { some: {} } });
+      }
+
       const clients = await prisma.user.findMany({
-        where: { role: Role.CLIENT, isActive: true },
+        where: { AND: filters },
         select: {
           id: true,
           name: true,
           email: true,
           phone: true,
           createdAt: true,
+          _count: { select: { laundryOrders: true, reservations: true } },
           laundryOrders: {
             orderBy: { createdAt: 'desc' },
             take: 20,
@@ -314,7 +383,7 @@ export function registerAssistedRoutes(
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 500,
+        take: limit,
       });
 
       return res.json({
@@ -333,8 +402,8 @@ export function registerAssistedRoutes(
             phone: client.phone ?? undefined,
             createdAt: client.createdAt.toISOString(),
             lastActivityAt: dates[0]?.toISOString() ?? client.createdAt.toISOString(),
-            assistedCount: client.laundryOrders.length,
-            reservationCount: client.reservations.length,
+            assistedCount: client._count.laundryOrders,
+            reservationCount: client._count.reservations,
             activeAssistedCount: activeAssisted.length,
             activeOrders: activeAssisted.map((order) => ({
               id: order.id,
@@ -345,6 +414,8 @@ export function registerAssistedRoutes(
             })),
           };
         }),
+        limit,
+        truncated: clients.length === limit,
       });
     } catch (error) {
       next(error);
@@ -355,7 +426,7 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
-      const orderId = String(req.params.orderId);
+      const orderId = safeId(req.params.orderId, 'Orden');
 
       const existing = await prisma.laundryOrder.findUnique({
         where: { id: orderId },
@@ -489,7 +560,7 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
-      const orderId = String(req.params.orderId);
+      const orderId = safeId(req.params.orderId, 'Orden');
       const nextStatus = req.body?.status as OrderStatus;
       if (!Object.values(OrderStatus).includes(nextStatus)) {
         return res.status(400).json({ message: 'Estado inválido.' });
@@ -545,7 +616,7 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
-      const orderId = String(req.params.orderId);
+      const orderId = safeId(req.params.orderId, 'Orden');
       const message = String(req.body?.message ?? '').trim();
       const isInternal = req.body?.isInternal === true;
       if (!message || message.length > 1000) return res.status(400).json({ message: 'Mensaje inválido.' });
@@ -587,7 +658,7 @@ export function registerAssistedRoutes(
     try {
       const user = await requireUser(req, res, Role.CLIENT);
       if (!user) return;
-      const orderId = String(req.params.orderId);
+      const orderId = safeId(req.params.orderId, 'Orden');
       const message = String(req.body?.message ?? '').trim();
       if (!message || message.length > 1000) return res.status(400).json({ message: 'Mensaje inválido.' });
       const order = await prisma.laundryOrder.findFirst({ where: { id: orderId, clientId: user.id }, select: { id: true } });
@@ -617,7 +688,7 @@ export function registerAssistedRoutes(
       if (!admin) return;
       if (!firebaseReady()) return res.status(503).json({ message: 'Firebase Storage no está configurado.' });
 
-      const orderId = String(req.params.orderId);
+      const orderId = safeId(req.params.orderId, 'Orden');
       const description = String(Array.isArray(req.body?.description) ? req.body.description[0] : req.body?.description ?? 'Evidencia del servicio')
         .trim()
         .slice(0, 500);
