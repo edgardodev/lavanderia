@@ -4,6 +4,13 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
+const ARGON2_OPTIONS = {
+  type: argon2.argon2id,
+  memoryCost: 65_536,
+  timeCost: 3,
+  parallelism: 1,
+} as const;
+
 function validateBootstrapPassword(password: string, email: string, name: string) {
   if (password.length < 16 || password.length > 128) {
     throw new Error('ADMIN_BOOTSTRAP_PASSWORD debe tener entre 16 y 128 caracteres.');
@@ -49,7 +56,7 @@ async function bootstrapAdministrator() {
     return false;
   }
 
-  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  const passwordHash = await argon2.hash(password, ARGON2_OPTIONS);
   const created = await prisma.user.create({
     data: {
       name,
