@@ -704,16 +704,26 @@ export function registerAssistedRoutes(
         return { file, kind };
       });
 
-      const uploads = [] as { path: string; file: Express.Multer.File; kind: { mimeType: string; extension: string } }[];
-      for (const item of prepared) {
+      const uploadResults = await Promise.allSettled(prepared.map(async (item) => {
         const path = await uploadEvidenceImage({
           orderId,
           buffer: item.file.buffer,
           mimeType: item.kind.mimeType,
           extension: item.kind.extension,
         });
-        uploadedPaths.push(path);
-        uploads.push({ path, ...item });
+        return { path, ...item };
+      }));
+
+      const uploads = uploadResults
+        .filter((result): result is PromiseFulfilledResult<{ path: string; file: Express.Multer.File; kind: { mimeType: string; extension: string } }> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      uploadedPaths.push(...uploads.map((item) => item.path));
+
+      const failedUpload = uploadResults.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failedUpload) {
+        await Promise.all(uploadedPaths.map((path) => deleteEvidenceImage(path).catch(() => undefined)));
+        uploadedPaths.length = 0;
+        throw failedUpload.reason instanceof Error ? failedUpload.reason : new Error('No se pudo completar la carga de evidencias.');
       }
 
       const records = await prisma.$transaction(async (tx) => {
