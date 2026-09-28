@@ -520,9 +520,12 @@ export function registerWompiPaymentRoutes(
         return res.status(200).json({ received: true });
       }
 
-      if (FINAL_PAYMENT_STATUSES.has(status)) {
+      if (!payment.wompiTransactionId || FINAL_PAYMENT_STATUSES.has(status)) {
         const remote = await fetchWompiTransaction(transactionId);
-        if (!transactionMatchesPayment(remote, payment) || String(remote.status ?? '').toUpperCase() !== String(transaction.status ?? '').toUpperCase()) {
+        if (
+          !transactionMatchesPayment(remote, payment)
+          || String(remote.status ?? '').toUpperCase() !== String(transaction.status ?? '').toUpperCase()
+        ) {
           return res.status(409).json({ message: 'La verificación directa con Wompi no coincide.' });
         }
       }
