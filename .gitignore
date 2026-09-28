@@ -16,6 +16,8 @@ frontend/web/.env.*
 # Backend
 backend/node_modules/
 backend/dist/
+backend/.local-evidence/
+.local-evidence/
 
 # Frontend (Next.js)
 frontend/web/node_modules/
