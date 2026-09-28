@@ -19,6 +19,8 @@ const ADMIN_PREAUTH_MINUTES = 10;
 const MAX_FAILED_ATTEMPTS = 5;
 const CLIENT_LOCK_MINUTES = 15;
 const ADMIN_LOCK_MINUTES = 30;
+const MAX_PASSWORD_INPUT_CHARS = 128;
+const MAX_SECOND_FACTOR_INPUT_CHARS = 64;
 const POLICY_VERSION = process.env.PRIVACY_POLICY_VERSION ?? '2026-09-15';
 const TERMS_VERSION = process.env.TERMS_VERSION ?? '2026-09-15';
 const ARGON2_OPTIONS = {
@@ -325,15 +327,20 @@ async function registerFailure(prisma: PrismaClient, userId: string, admin: bool
 }
 
 async function verifyPasswordLogin(prisma: PrismaClient, email: string, password: string, role: Role) {
+  const candidatePassword = password.length <= MAX_PASSWORD_INPUT_CHARS ? password : 'invalid-password-input';
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || user.role !== role || !user.isActive) {
     const dummyHash = await dummyPasswordHash();
-    await argon2.verify(dummyHash, password).catch(() => false);
+    await argon2.verify(dummyHash, candidatePassword).catch(() => false);
     return undefined;
   }
-  if (user.lockedUntil && user.lockedUntil > new Date()) return undefined;
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const dummyHash = await dummyPasswordHash();
+    await argon2.verify(dummyHash, candidatePassword).catch(() => false);
+    return undefined;
+  }
 
-  const valid = await argon2.verify(user.passwordHash, password).catch(() => false);
+  const valid = await argon2.verify(user.passwordHash, candidatePassword).catch(() => false);
   if (!valid) {
     await registerFailure(prisma, user.id, role === Role.ADMIN);
     return undefined;
@@ -363,7 +370,7 @@ async function verifyAdminSecondFactor(prisma: PrismaClient, user: {
   mfaRecoveryHashes: unknown;
 }, otp: unknown) {
   const value = String(otp ?? '').trim();
-  if (!value) return false;
+  if (!value || value.length > MAX_SECOND_FACTOR_INPUT_CHARS) return false;
   if (user.mfaSecretEncrypted && /^\d{6}$/.test(value)) {
     return verifyTotp(decryptSecret(user.mfaSecretEncrypted), value);
   }
@@ -658,6 +665,7 @@ export function registerAuthRoutes(
     const consents = await prisma.userConsent.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
+      take: 100,
       select: { id: true, consentType: true, policyVersion: true, accepted: true, createdAt: true },
     });
     return res.json({ consents });
@@ -689,6 +697,7 @@ export function registerAuthRoutes(
     const admins = await prisma.user.findMany({
       where: { role: Role.ADMIN },
       orderBy: { createdAt: 'asc' },
+      take: 100,
       select: {
         id: true,
         name: true,
@@ -701,7 +710,7 @@ export function registerAuthRoutes(
         lastLoginAt: true,
       },
     });
-    return res.json({ admins });
+    return res.json({ admins, truncated: admins.length === 100 });
   });
 
   app.post('/api/admin/security/users', async (req, res) => {
