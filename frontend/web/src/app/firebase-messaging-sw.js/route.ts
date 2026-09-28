@@ -19,11 +19,17 @@ importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-com
 firebase.initializeApp(${JSON.stringify(config)});
 const messaging = firebase.messaging();
 
+function safeAppPath(value, fallback) {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
+    ? value
+    : fallback;
+}
+
 messaging.onBackgroundMessage((payload) => {
   if (payload.notification) return;
   const title = payload.data?.title || 'La Lavandería & Bakery';
   const body = payload.data?.body || 'Tienes una actualización de tu servicio.';
-  const url = payload.data?.url || '/client/assisted';
+  const url = safeAppPath(payload.data?.url, '/client/assisted');
   self.registration.showNotification(title, {
     body,
     icon: '/logo.png',
@@ -32,7 +38,7 @@ messaging.onBackgroundMessage((payload) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
-  const url = event.notification?.data?.url || '/client/dashboard';
+  const url = safeAppPath(event.notification?.data?.url, '/client/dashboard');
   event.notification?.close();
   event.waitUntil(clients.openWindow(url));
 });
