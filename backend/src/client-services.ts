@@ -35,6 +35,11 @@ function toWompiCents(amountInCop: number) {
   return amountInCop * 100;
 }
 
+function publicClientError(error: unknown, fallback: string) {
+  if (process.env.NODE_ENV === 'production') return fallback;
+  return error instanceof Error ? error.message : fallback;
+}
+
 function requestKey(req: Request) {
   const value = String(req.get('Idempotency-Key') ?? req.body?.requestKey ?? '').trim();
   if (!/^[A-Za-z0-9:_-]{8,80}$/.test(value)) {
@@ -213,7 +218,7 @@ export function registerIdempotentClientServiceRoutes(
         }
         return res.status(409).json({ message: 'Esta máquina acaba de ser reservada o bloqueada. Selecciona otra.' });
       }
-      return res.status(409).json({ message: error?.message ?? 'No se pudo crear la reserva.' });
+      return res.status(409).json({ message: publicClientError(error, 'No se pudo crear la reserva.') });
     }
   });
 
