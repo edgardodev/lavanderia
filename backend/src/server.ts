@@ -220,11 +220,14 @@ app.use('/api/auth/register', authLimiter, authConcurrency);
 app.use('/api/auth/admin/login', authLimiter, authConcurrency);
 app.use('/api/auth/admin/security/password', authLimiter, authConcurrency);
 app.use('/api/auth/admin/security/mfa', authLimiter);
+app.use('/api/admin/security/users', (req, res, next) => (
+  req.method === 'POST' ? authConcurrency(req, res, next) : next()
+));
 app.use('/api/payments/wompi/checkout', paymentLimiter);
 app.use('/api/payments/wompi/webhook', webhookLimiter);
 app.use('/api/admin/orders/:orderId/evidence', uploadLimiter, uploadConcurrency);
 app.use((req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.path !== '/payments/wompi/webhook') {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.path.endsWith('/payments/wompi/webhook')) {
     return writeLimiter(req, res, next);
   }
   next();
