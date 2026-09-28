@@ -189,6 +189,32 @@ async function main() {
 
   await api(admin, '/admin/clients');
   await api(admin, '/admin/reservations');
+  const capabilities = await api(admin, '/admin/capabilities');
+  assert(capabilities.data?.evidenceStorage === true, 'El entorno de desarrollo no habilitó almacenamiento de evidencias.');
+
+  const staffEmail = `staff.integration.${unique}@example.com`;
+  const createdStaff = await api(admin, '/admin/security/users', {
+    method: 'POST',
+    expected: [201],
+    body: { name: 'Operador Integración', email: staffEmail },
+  });
+  assert(
+    createdStaff.data?.admin?.email === staffEmail
+      && typeof createdStaff.data?.temporaryPassword === 'string'
+      && createdStaff.data.temporaryPassword.length >= 16,
+    'El administrador principal no pudo generar una credencial temporal.',
+  );
+  const staffRecord = await prisma.user.findUnique({
+    where: { email: staffEmail },
+    select: { isActive: true, canManageAdmins: true, mustChangePassword: true, mfaEnabled: true },
+  });
+  assert(
+    staffRecord?.isActive === true
+      && staffRecord.canManageAdmins === false
+      && staffRecord.mustChangePassword === true
+      && staffRecord.mfaEnabled === false,
+    'La credencial de trabajador no quedó con el onboarding seguro esperado.',
+  );
 
   const combinedBrowser = new CookieJar();
   for (const [name, value] of client.cookies) combinedBrowser.cookies.set(name, value);
@@ -283,7 +309,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'role-isolated-sessions', 'role-cookie-csrf', 'active-history-views', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'admin-credential-creation', 'local-evidence-capability', 'role-isolated-sessions', 'role-cookie-csrf', 'active-history-views', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()
