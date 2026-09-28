@@ -80,6 +80,8 @@ async function notifyClient(
   try {
     const tokenRows = await prisma.pushToken.findMany({
       where: { userId },
+      orderBy: { lastSeenAt: 'desc' },
+      take: 10,
       select: { token: true },
     });
     const tokens = tokenRows.map((row) => row.token);
@@ -183,13 +185,14 @@ async function orderDto(order: any, includeInternal: boolean) {
     client: order.client
       ? { id: order.client.id, name: order.client.name, email: order.client.email, phone: order.client.phone ?? undefined }
       : undefined,
-    statusHistory: (order.statusHistory ?? []).map((item: any) => ({
+    statusHistory: [...(order.statusHistory ?? [])].reverse().map((item: any) => ({
       id: item.id,
       status: item.status,
       message: item.message,
       createdAt: item.createdAt.toISOString(),
     })),
-    messages: (order.messages ?? [])
+    messages: [...(order.messages ?? [])]
+      .reverse()
       .filter((item: any) => includeInternal || !item.isInternal)
       .map((item: any) => ({
         id: item.id,
@@ -208,12 +211,13 @@ const orderInclude = {
   client: { select: { id: true, name: true, email: true, phone: true } },
   branch: { select: { id: true, name: true } },
   payment: { select: { status: true } },
-  statusHistory: { orderBy: { createdAt: 'asc' as const } },
+  statusHistory: { orderBy: { createdAt: 'desc' as const }, take: 50 },
   messages: {
     include: { author: { select: { name: true, role: true } } },
-    orderBy: { createdAt: 'asc' as const },
+    orderBy: { createdAt: 'desc' as const },
+    take: 100,
   },
-  evidencePhotos: { orderBy: { createdAt: 'asc' as const } },
+  evidencePhotos: { orderBy: { createdAt: 'desc' as const }, take: 40 },
 };
 
 export function registerAssistedRoutes(
@@ -248,13 +252,13 @@ export function registerAssistedRoutes(
         where: { id: orderId, clientId: user.id },
         select: {
           id: true,
-          evidencePhotos: { orderBy: { createdAt: 'asc' } },
+          evidencePhotos: { orderBy: { createdAt: 'desc' }, take: 40 },
         },
       });
       if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
 
       return res.json({
-        evidence: await Promise.all(order.evidencePhotos.map((photo) => evidenceDto(photo, true))),
+        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => evidenceDto(photo, true))),
       });
     } catch (error) {
       next(error);
