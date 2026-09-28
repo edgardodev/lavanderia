@@ -112,14 +112,41 @@ export function verifyWompiEvent(body: any, headerChecksum?: string) {
   if (body.environment !== expectedEnvironment) return false;
 
   const properties = body.signature?.properties;
-  const checksum = String(headerChecksum || body.signature?.checksum || '');
+  const bodyChecksum = String(body.signature?.checksum ?? '');
+  const headerValue = String(headerChecksum ?? '');
+  const checksum = headerValue || bodyChecksum;
   const timestamp = body.timestamp;
-  if (!Array.isArray(properties) || properties.length === 0 || !Number.isInteger(timestamp) || !checksum) return false;
+
+  if (
+    !Array.isArray(properties)
+    || properties.length === 0
+    || properties.length > 32
+    || !Number.isSafeInteger(timestamp)
+    || timestamp <= 0
+    || !checksum
+  ) {
+    return false;
+  }
+  if (headerValue && bodyChecksum && !safeEqualHex(headerValue, bodyChecksum)) return false;
 
   const propertyString = properties.map((property: unknown) => {
-    if (typeof property !== 'string') throw new Error('Propiedad de firma de Wompi inválida.');
+    if (
+      typeof property !== 'string'
+      || property.length < 1
+      || property.length > 160
+      || !/^[A-Za-z0-9_.-]+$/.test(property)
+      || property.split('.').some((part) => !part)
+    ) {
+      throw new Error('Propiedad de firma de Wompi inválida.');
+    }
     const value = nestedValue(body.data, property);
-    if (value === undefined || value === null) throw new Error('Evento Wompi incompleto.');
+    if (
+      value === undefined
+      || value === null
+      || !['string', 'number', 'boolean'].includes(typeof value)
+    ) {
+      throw new Error('Evento Wompi incompleto.');
+    }
     return String(value);
   }).join('');
 
