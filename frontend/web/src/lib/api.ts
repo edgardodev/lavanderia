@@ -1,5 +1,10 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+export function apiUrl(path: string) {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 export class ApiError extends Error {
   status: number;
   data: unknown;
