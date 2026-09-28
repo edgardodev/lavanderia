@@ -34,6 +34,14 @@ The API uses:
 
 Client polling is paused while browser tabs are hidden. Administrative lists use bounded server-side filtering instead of loading the full database into the browser.
 
+## Unpaid reservation abuse controls
+
+Self-service machine capacity cannot be held indefinitely without payment. A pending reservation without a payment attempt expires after `RESERVATION_HOLD_MINUTES` (15 minutes by default), releases its `MachineSlot`, and is audited. Checkout expiration cannot extend beyond the original reservation hold, and each client is limited by `MAX_PENDING_RESERVATIONS_PER_CLIENT` (3 by default).
+
+## Data-volume controls
+
+Operational list endpoints use server-side filters and bounded result sets. Nested assisted-order history is also bounded (recent status history, messages and evidence), and evidence signed URLs are generated only through authorized lazy-load endpoints instead of during every list refresh. Polling pauses while browser tabs are hidden and resumes on focus.
+
 ## Database consistency
 
 Critical workflows use database constraints and transactions:
@@ -42,6 +50,7 @@ Critical workflows use database constraints and transactions:
 - reservation/order creation is idempotent;
 - pricing and workflow transitions are serialized;
 - payment updates use conditional state claims to prevent concurrent webhook events from regressing final states;
+- Wompi event replays are idempotent, transaction IDs cannot silently change for a payment, and the first observed transaction plus all final states are verified directly with Wompi;
 - operational composite indexes support branch/status/date queries as data grows.
 
 All schema changes must be made through committed Prisma migrations. Never run `init.sql` against an installed environment.
