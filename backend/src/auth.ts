@@ -165,7 +165,8 @@ function readAdminPreauth(req: Request): SessionPayload | undefined {
 }
 
 function normalizeEmail(value: unknown) {
-  return String(value ?? '').trim().toLowerCase();
+  const email = String(value ?? '').trim().toLowerCase();
+  return email.length <= 190 ? email : '';
 }
 
 function cleanPhone(value: unknown) {
