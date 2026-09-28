@@ -2,7 +2,11 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import { OrderStatus, PaymentStatus, Prisma, PrismaClient, Role } from '@prisma/client';
 import {
   deleteEvidenceImage,
+  evidenceStorageReady,
   firebaseReady,
+  isLocalEvidencePath,
+  localEvidenceStorageReady,
+  readLocalEvidenceImage,
   sendPush,
   signedEvidenceUrl,
   uploadEvidenceImage,
@@ -143,13 +147,17 @@ function imageKind(file: Express.Multer.File) {
   return undefined;
 }
 
-async function evidenceDto(photo: any, includeSignedUrl = false) {
+async function evidenceDto(photo: any, includeSignedUrl = false, localUrl?: string) {
   let url: string | undefined;
-  if (includeSignedUrl && typeof photo.imageUrl === 'string' && photo.imageUrl.startsWith('evidence/')) {
-    try {
-      url = await signedEvidenceUrl(photo.imageUrl);
-    } catch (error) {
-      console.error('No se pudo firmar URL de evidencia', error);
+  if (includeSignedUrl && typeof photo.imageUrl === 'string') {
+    if (photo.imageUrl.startsWith('evidence/')) {
+      try {
+        url = await signedEvidenceUrl(photo.imageUrl);
+      } catch (error) {
+        console.error('No se pudo firmar URL de evidencia', error);
+      }
+    } else if (isLocalEvidencePath(photo.imageUrl) && localUrl) {
+      url = localUrl;
     }
   }
   return {
@@ -298,8 +306,35 @@ export function registerAssistedRoutes(
       if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
 
       return res.json({
-        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => evidenceDto(photo, true))),
+        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => (
+          evidenceDto(photo, true, `/client/orders/${orderId}/evidence/${photo.id}/file`)
+        ))),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/client/orders/:orderId/evidence/:evidenceId/file', async (req, res, next) => {
+    try {
+      const user = await requireUser(req, res, Role.CLIENT);
+      if (!user) return;
+      const orderId = safeId(req.params.orderId, 'Orden');
+      const evidenceId = safeId(req.params.evidenceId, 'Evidencia');
+      const photo = await prisma.evidencePhoto.findFirst({
+        where: { id: evidenceId, orderId, order: { clientId: user.id } },
+        select: { imageUrl: true, mimeType: true },
+      });
+      if (!photo || !isLocalEvidencePath(photo.imageUrl)) {
+        return res.status(404).json({ message: 'Evidencia no encontrada.' });
+      }
+      const buffer = await readLocalEvidenceImage(photo.imageUrl).catch(() => undefined);
+      if (!buffer) return res.status(404).json({ message: 'Evidencia no encontrada.' });
+      res.setHeader('Content-Type', photo.mimeType);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(buffer);
     } catch (error) {
       next(error);
     }
@@ -321,8 +356,35 @@ export function registerAssistedRoutes(
       if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
 
       return res.json({
-        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => evidenceDto(photo, true))),
+        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => (
+          evidenceDto(photo, true, `/admin/orders/${orderId}/evidence/${photo.id}/file`)
+        ))),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/admin/orders/:orderId/evidence/:evidenceId/file', async (req, res, next) => {
+    try {
+      const admin = await requireUser(req, res, Role.ADMIN);
+      if (!admin) return;
+      const orderId = safeId(req.params.orderId, 'Orden');
+      const evidenceId = safeId(req.params.evidenceId, 'Evidencia');
+      const photo = await prisma.evidencePhoto.findFirst({
+        where: { id: evidenceId, orderId },
+        select: { imageUrl: true, mimeType: true },
+      });
+      if (!photo || !isLocalEvidencePath(photo.imageUrl)) {
+        return res.status(404).json({ message: 'Evidencia no encontrada.' });
+      }
+      const buffer = await readLocalEvidenceImage(photo.imageUrl).catch(() => undefined);
+      if (!buffer) return res.status(404).json({ message: 'Evidencia no encontrada.' });
+      res.setHeader('Content-Type', photo.mimeType);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(buffer);
     } catch (error) {
       next(error);
     }
@@ -334,6 +396,8 @@ export function registerAssistedRoutes(
       if (!admin) return;
       return res.json({
         firebaseStorage: firebaseReady(),
+        evidenceStorage: evidenceStorageReady(),
+        localEvidenceStorage: localEvidenceStorageReady() && !firebaseReady(),
       });
     } catch (error) {
       next(error);
@@ -799,7 +863,9 @@ export function registerAssistedRoutes(
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
       if (!admin) return;
-      if (!firebaseReady()) return res.status(503).json({ message: 'Firebase Storage no está configurado.' });
+      if (!evidenceStorageReady()) {
+        return res.status(503).json({ message: 'El almacenamiento privado de evidencias no está configurado.' });
+      }
 
       const orderId = safeId(req.params.orderId, 'Orden');
       const description = String(Array.isArray(req.body?.description) ? req.body.description[0] : req.body?.description ?? 'Evidencia del servicio')
