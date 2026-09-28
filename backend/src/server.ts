@@ -240,7 +240,7 @@ async function requireUser(
   res: express.Response,
   role?: Role,
 ): Promise<AuthenticatedUser | undefined> {
-  const session = readSession(req);
+  const session = readSession(req, role);
   if (!session?.sub || session.purpose !== 'session' || typeof session.ver !== 'number') {
     res.status(401).json({ message: 'Debes iniciar sesión para continuar.' });
     return undefined;

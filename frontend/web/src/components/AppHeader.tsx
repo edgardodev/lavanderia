@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Logo } from './Logo';
 
@@ -15,12 +15,19 @@ type SessionUser = {
 
 export function AppHeader() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     let active = true;
-    apiFetch<{ user: SessionUser }>('/auth/session')
+    const roleHint = pathname.startsWith('/admin')
+      ? '?role=admin'
+      : pathname.startsWith('/client')
+        ? '?role=client'
+        : '';
+
+    apiFetch<{ user: SessionUser }>(`/auth/session${roleHint}`)
       .then((data) => {
         if (active) setUser(data.user);
       })
@@ -30,13 +37,14 @@ export function AppHeader() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pathname]);
 
   async function signOut() {
     if (signingOut) return;
     setSigningOut(true);
     try {
-      await apiFetch('/auth/logout', { method: 'POST' });
+      const role = user?.role === 'ADMIN' ? 'admin' : user?.role === 'CLIENT' ? 'client' : '';
+      await apiFetch(`/auth/logout${role ? `?role=${role}` : ''}`, { method: 'POST' });
     } catch {
       // Even if the server session already expired, return to the public login screen.
     } finally {

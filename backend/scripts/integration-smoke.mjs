@@ -189,6 +189,20 @@ async function main() {
 
   await api(admin, '/admin/clients');
   await api(admin, '/admin/reservations');
+
+  const combinedBrowser = new CookieJar();
+  for (const [name, value] of client.cookies) combinedBrowser.cookies.set(name, value);
+  for (const [name, value] of admin.cookies) combinedBrowser.cookies.set(name, value);
+  const adminSessionInSharedBrowser = await api(combinedBrowser, '/auth/session?role=admin');
+  const clientSessionInSharedBrowser = await api(combinedBrowser, '/auth/session?role=client');
+  assert(
+    adminSessionInSharedBrowser.data?.user?.role === 'ADMIN'
+      && clientSessionInSharedBrowser.data?.user?.role === 'CLIENT',
+    'Las sesiones admin/cliente no pueden coexistir en el mismo navegador.',
+  );
+  await api(combinedBrowser, '/admin/clients');
+  await api(combinedBrowser, '/client/orders');
+
   const summary = await api(admin, '/admin/dashboard-summary');
   assert(typeof summary.data?.metrics?.activeOrders === 'number', 'Dashboard admin no devolvió métricas operativas.');
 
@@ -254,7 +268,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'role-isolated-sessions', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()

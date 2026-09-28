@@ -97,6 +97,10 @@ function authCookieOptions(maxAge: number) {
   };
 }
 
+function sessionCookieName(role: Role) {
+  return role === Role.ADMIN ? 'admin_auth_token' : 'client_auth_token';
+}
+
 function csrfCookieOptions(maxAge: number) {
   return {
     httpOnly: false,
@@ -129,7 +133,13 @@ function signAdminPreauth(user: { id: string; sessionVersion: number }) {
 function issueSession(res: Response, user: { id: string; role: Role; sessionVersion: number }, mfa: boolean) {
   const hours = user.role === Role.ADMIN ? adminSessionHours() : CLIENT_SESSION_HOURS;
   const maxAge = hours * 60 * 60 * 1000;
-  res.cookie('auth_token', signSession(user, mfa), authCookieOptions(maxAge));
+  const token = signSession(user, mfa);
+
+  // Keep role sessions independent so a client login in another browser tab does not
+  // replace the administrator session (and vice versa). auth_token remains during
+  // the migration window for compatibility with older clients and smoke tests.
+  res.cookie(sessionCookieName(user.role), token, authCookieOptions(maxAge));
+  res.cookie('auth_token', token, authCookieOptions(maxAge));
   res.cookie('csrf_token', nanoid(32), csrfCookieOptions(maxAge));
   res.clearCookie('admin_preauth', authCookieOptions(0));
 }
@@ -144,8 +154,10 @@ function issueAdminPreauth(res: Response, user: { id: string; sessionVersion: nu
   res.cookie('csrf_token', nanoid(32), csrfCookieOptions(maxAge));
 }
 
-export function readSession(req: Request): SessionPayload | undefined {
-  const token = req.cookies?.auth_token;
+export function readSession(req: Request, role?: Role): SessionPayload | undefined {
+  const token = role
+    ? (req.cookies?.[sessionCookieName(role)] ?? req.cookies?.auth_token)
+    : (req.cookies?.admin_auth_token ?? req.cookies?.client_auth_token ?? req.cookies?.auth_token);
   if (!token) return undefined;
   try {
     return jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as SessionPayload;
@@ -640,7 +652,17 @@ export function registerAuthRoutes(
   });
 
   app.get('/api/auth/session', async (req, res) => {
-    const user = await requireUser(req, res);
+    const roleParam = String(req.query.role ?? '').trim().toLowerCase();
+    const requestedRole = roleParam === 'admin'
+      ? Role.ADMIN
+      : roleParam === 'client'
+        ? Role.CLIENT
+        : undefined;
+    if (roleParam && !requestedRole) {
+      return res.status(400).json({ message: 'Tipo de sesión inválido.' });
+    }
+
+    const user = await requireUser(req, res, requestedRole);
     if (!user) return;
     return res.json({
       user: {
@@ -652,7 +674,22 @@ export function registerAuthRoutes(
     });
   });
 
-  app.post('/api/auth/logout', async (_req, res) => {
+  app.post('/api/auth/logout', async (req, res) => {
+    const roleParam = String(req.query.role ?? '').trim().toLowerCase();
+    if (roleParam === 'admin') {
+      res.clearCookie('admin_auth_token', authCookieOptions(0));
+      res.clearCookie('auth_token', authCookieOptions(0));
+      res.clearCookie('admin_preauth', authCookieOptions(0));
+      return res.status(204).send();
+    }
+    if (roleParam === 'client') {
+      res.clearCookie('client_auth_token', authCookieOptions(0));
+      res.clearCookie('auth_token', authCookieOptions(0));
+      return res.status(204).send();
+    }
+
+    res.clearCookie('admin_auth_token', authCookieOptions(0));
+    res.clearCookie('client_auth_token', authCookieOptions(0));
     res.clearCookie('auth_token', authCookieOptions(0));
     res.clearCookie('csrf_token', csrfCookieOptions(0));
     res.clearCookie('admin_preauth', authCookieOptions(0));
