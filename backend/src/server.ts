@@ -210,6 +210,8 @@ app.use(mutationGuard(allowedOrigins));
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/admin/login', authLimiter);
+app.use('/api/auth/admin/security/password', authLimiter);
+app.use('/api/auth/admin/security/mfa', authLimiter);
 app.use('/api/payments/wompi/checkout', paymentLimiter);
 app.use('/api/payments/wompi/webhook', webhookLimiter);
 app.use('/api/admin/orders/:orderId/evidence', uploadLimiter, uploadConcurrency);
@@ -700,6 +702,15 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   if (res.headersSent) return;
   if (err instanceof RequestValidationError) {
     return res.status(400).json({ message: err.message });
+  }
+  if (err instanceof SyntaxError && err?.status === 400) {
+    return res.status(400).json({ message: 'El cuerpo JSON de la solicitud es inválido.' });
+  }
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({ message: 'La solicitud supera el tamaño permitido.' });
+  }
+  if (err?.message === 'Tipo de archivo no permitido.') {
+    return res.status(415).json({ message: 'Tipo de archivo no permitido.' });
   }
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ message: 'La carga de archivos supera los límites permitidos.' });
