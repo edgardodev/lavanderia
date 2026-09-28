@@ -30,6 +30,12 @@ function publicErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function reservationHoldMinutes() {
+  const value = Number(process.env.RESERVATION_HOLD_MINUTES ?? 15);
+  if (!Number.isFinite(value)) return 15;
+  return Math.min(60, Math.max(5, Math.trunc(value)));
+}
+
 const FINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.APPROVED,
   PaymentStatus.DECLINED,
@@ -96,6 +102,47 @@ function buildCheckout(payment: {
 
 export async function releaseExpiredWompiCheckouts(prisma: PrismaClient) {
   const now = new Date();
+  const unpaidReservationCutoff = new Date(now.getTime() - reservationHoldMinutes() * 60_000);
+
+  const staleUnpaidReservations = await prisma.reservation.findMany({
+    where: {
+      status: ReservationStatus.PENDING_PAYMENT,
+      paymentId: null,
+      createdAt: { lt: unpaidReservationCutoff },
+    },
+    select: { id: true, branchId: true, machineId: true },
+    take: 100,
+  });
+
+  for (const reservation of staleUnpaidReservations) {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          status: ReservationStatus.PENDING_PAYMENT,
+          paymentId: null,
+          createdAt: { lt: unpaidReservationCutoff },
+        },
+        data: { status: ReservationStatus.CANCELLED },
+      });
+      if (claimed.count !== 1) return;
+
+      await tx.machineSlot.deleteMany({ where: { reservationId: reservation.id } });
+      await tx.auditLog.create({
+        data: {
+          action: 'RESERVATION_UNPAID_HOLD_EXPIRED',
+          entity: 'RESERVATION',
+          entityId: reservation.id,
+          metadata: {
+            branchId: reservation.branchId,
+            machineId: reservation.machineId,
+            holdMinutes: reservationHoldMinutes(),
+          },
+        },
+      });
+    });
+  }
+
   const expired = await prisma.payment.findMany({
     where: {
       provider: 'WOMPI',
