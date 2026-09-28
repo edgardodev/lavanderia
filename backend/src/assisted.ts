@@ -679,9 +679,13 @@ export function registerAssistedRoutes(
         },
       });
       if (!isInternal) {
-        queueClientNotification(prisma, order.clientId, 'Mensaje sobre tu servicio', message.slice(0, 180), {
-          type: 'ORDER_MESSAGE', orderId, url: '/client/assisted',
-        });
+        queueClientNotification(
+          prisma,
+          order.clientId,
+          'Mensaje sobre tu servicio',
+          'Tienes un nuevo mensaje del equipo. Abre la aplicación para verlo.',
+          { type: 'ORDER_MESSAGE', orderId, url: '/client/assisted' },
+        );
       }
       return res.status(201).json({
         message: {
@@ -803,9 +807,13 @@ export function registerAssistedRoutes(
         return created;
       });
 
-      queueClientNotification(prisma, order.clientId, 'Nueva evidencia de tu servicio', description || 'Agregamos fotos de evidencia a tu orden.', {
-        type: 'ORDER_EVIDENCE', orderId, url: '/client/assisted',
-      });
+      queueClientNotification(
+        prisma,
+        order.clientId,
+        'Nueva evidencia de tu servicio',
+        'Agregamos nueva evidencia fotográfica a tu servicio. Abre la aplicación para verla.',
+        { type: 'ORDER_EVIDENCE', orderId, url: '/client/assisted' },
+      );
       return res.status(201).json({ evidence: await Promise.all(records.map((photo) => evidenceDto(photo, false))) });
     } catch (error: any) {
       await Promise.all(uploadedPaths.map((path) => deleteEvidenceImage(path).catch(() => undefined)));
