@@ -750,7 +750,10 @@ export function registerAuthRoutes(
     if (!admin) return;
     if (!admin.canManageAdmins) return res.status(403).json({ message: 'No tienes permiso para administrar accesos.' });
     const userId = safeId(req.params.userId, 'Administrador');
-    if (userId === admin.id && req.body?.isActive === false) {
+    if (typeof req.body?.isActive !== 'boolean') {
+      return res.status(400).json({ message: 'isActive debe ser booleano.' });
+    }
+    if (userId === admin.id && req.body.isActive === false) {
       return res.status(400).json({ message: 'No puedes desactivar tu propia cuenta desde esta sesión.' });
     }
     const target = await prisma.user.findFirst({ where: { id: userId, role: Role.ADMIN } });
@@ -758,7 +761,7 @@ export function registerAuthRoutes(
     const updated = await prisma.user.update({
       where: { id: userId },
       data: {
-        isActive: req.body?.isActive === true,
+        isActive: req.body.isActive,
         sessionVersion: { increment: 1 },
       },
       select: { id: true, name: true, email: true, isActive: true },
