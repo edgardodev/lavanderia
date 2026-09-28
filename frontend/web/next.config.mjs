@@ -14,6 +14,7 @@ const scriptSources = [
   "'unsafe-inline'",
   ...(isProduction ? [] : ["'unsafe-eval'"]),
   'https://checkout.wompi.co',
+  'https://www.gstatic.com',
 ];
 
 const contentSecurityPolicy = [
