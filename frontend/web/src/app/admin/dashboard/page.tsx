@@ -159,7 +159,10 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     const refresh = () => void refreshOperationalData();
-    const timer = window.setInterval(refresh, 5 * 60 * 1000);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const timer = window.setInterval(refreshIfVisible, 5 * 60 * 1000);
     window.addEventListener('focus', refresh);
     return () => {
       window.clearInterval(timer);
