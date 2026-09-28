@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { BellRing, CalendarClock, ShieldCheck, Shirt, UsersRound, WashingMachine } from 'lucide-react';
 import { AppHeader } from '@/components/AppHeader';
 import { BranchTabs } from '@/components/BranchTabs';
+import { EvidenceUploader } from '@/components/EvidenceUploader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
@@ -160,6 +161,7 @@ export default function AdminDashboardPage() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState('');
   const [activityTruncated, setActivityTruncated] = useState(false);
+  const [evidenceOrderId, setEvidenceOrderId] = useState<string | null>(null);
 
   const recordLoadError = useCallback((error: unknown) => {
     setLoadError(error instanceof Error ? error.message : 'No se pudo actualizar el dashboard.');
@@ -587,12 +589,30 @@ export default function AdminDashboardPage() {
                               <p className="mt-1 text-xs text-slate-500">{item.client.email}</p>
                               <p className="mt-2 text-sm font-bold text-aqua">{item.branch?.name ?? 'Sede pendiente'} · {statusLabels[item.status]}</p>
                             </div>
-                            <Link href={`/admin/orders?client=${encodeURIComponent(item.client.email)}`} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white">Abrir orden</Link>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEvidenceOrderId((current) => current === item.id ? null : item.id)}
+                                className="rounded-full border border-aqua/30 bg-white px-4 py-2 text-xs font-black text-aqua"
+                              >
+                                {evidenceOrderId === item.id ? 'Cerrar fotos' : 'Subir fotos'}
+                              </button>
+                              <Link href={`/admin/orders?client=${encodeURIComponent(item.client.email)}`} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white">Gestionar orden</Link>
+                            </div>
                           </div>
                           <div className="mt-3 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
                             <p><strong>Creada:</strong> {formatDateTime(item.createdAt)}</p>
                             <p><strong>Último movimiento:</strong> {formatDateTime(item.updatedAt)}</p>
                           </div>
+                          {evidenceOrderId === item.id && (
+                            <EvidenceUploader
+                              orderId={item.id}
+                              onUploaded={() => {
+                                void loadActivity('orders');
+                                void loadOrders();
+                              }}
+                            />
+                          )}
                         </div>
                       );
                     }
