@@ -131,6 +131,24 @@ async function main() {
   const reservationHistory = await api(client, '/client/reservations');
   assert(reservationHistory.data?.reservations?.some((r) => r.id === reservation1.data.reservation.id), 'Reserva ausente del historial.');
 
+  await prisma.reservation.update({
+    where: { id: reservation1.data.reservation.id },
+    data: { createdAt: new Date(Date.now() - 20 * 60_000) },
+  });
+  await api(client, '/payments/wompi/checkout', {
+    method: 'POST',
+    expected: [409],
+    body: { type: 'reservation', id: reservation1.data.reservation.id },
+  });
+  const expiredReservation = await prisma.reservation.findUnique({
+    where: { id: reservation1.data.reservation.id },
+    select: { status: true, slotLock: { select: { id: true } } },
+  });
+  assert(
+    expiredReservation?.status === 'CANCELLED' && expiredReservation.slotLock === null,
+    'La reserva sin pago no liberó la máquina después de vencer la retención.',
+  );
+
   const orderKey = `ci_ord_${unique}`;
   const orderBody = {
     branchId: branch.id,
@@ -236,7 +254,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()
