@@ -214,7 +214,7 @@ async function ownedResource(
   if (type === 'reservation') {
     return prisma.reservation.findFirst({
       where: { id, clientId: userId },
-      select: { id: true, amountCents: true, status: true, paymentId: true },
+      select: { id: true, amountCents: true, status: true, paymentId: true, createdAt: true },
     });
   }
 
@@ -346,7 +346,17 @@ export function registerWompiPaymentRoutes(
       }
 
       const config = getWompiConfig();
-      const expiresAt = new Date(Date.now() + config.checkoutTtlMinutes * 60_000);
+      const now = new Date();
+      const checkoutExpiresAt = new Date(now.getTime() + config.checkoutTtlMinutes * 60_000);
+      const expiresAt = type === 'reservation'
+        ? new Date(Math.min(
+            checkoutExpiresAt.getTime(),
+            (resource as typeof resource & { createdAt: Date }).createdAt.getTime() + reservationHoldMinutes() * 60_000,
+          ))
+        : checkoutExpiresAt;
+      if (expiresAt <= now) {
+        return res.status(409).json({ message: 'La retención de esta reserva venció. Crea una nueva reserva.' });
+      }
       const reference = paymentReference(type, id);
       const payment = await prisma.$transaction(async (tx) => {
         const created = await tx.payment.create({
