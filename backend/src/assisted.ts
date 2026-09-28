@@ -531,7 +531,7 @@ export function registerAssistedRoutes(
           },
         });
         return order;
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
       queueClientNotification(
         prisma,
@@ -543,6 +543,9 @@ export function registerAssistedRoutes(
 
       return res.json({ order: await orderDto(updated, true), notificationQueued: true });
     } catch (error: any) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+        return res.status(409).json({ message: 'La orden cambió al mismo tiempo. Recarga e intenta nuevamente.' });
+      }
       if (error instanceof Error && (
         error.message.startsWith('Debes ingresar')
         || error.message.startsWith('El valor de')
@@ -580,13 +583,16 @@ export function registerAssistedRoutes(
 
       const copy = statusCopy(nextStatus, existing.pickupType);
       const order = await prisma.$transaction(async (tx) => {
-        const updated = await tx.laundryOrder.update({
-          where: { id: orderId },
-          data: {
-            status: nextStatus,
-            statusHistory: { create: { status: nextStatus, adminId: admin.id, message: copy.body } },
-          },
-          include: orderInclude,
+        const claimed = await tx.laundryOrder.updateMany({
+          where: { id: orderId, status: existing.status },
+          data: { status: nextStatus },
+        });
+        if (claimed.count !== 1) {
+          throw new Error('ORDER_STATUS_CONCURRENT_UPDATE');
+        }
+
+        await tx.statusHistory.create({
+          data: { orderId, status: nextStatus, adminId: admin.id, message: copy.body },
         });
         await tx.auditLog.create({
           data: {
@@ -597,8 +603,12 @@ export function registerAssistedRoutes(
             metadata: { from: existing.status, to: nextStatus },
           },
         });
-        return updated;
-      });
+
+        return tx.laundryOrder.findUniqueOrThrow({
+          where: { id: orderId },
+          include: orderInclude,
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
       queueClientNotification(prisma, existing.clientId, copy.title, copy.body, {
         type: 'ORDER_STATUS',
@@ -607,7 +617,13 @@ export function registerAssistedRoutes(
         url: '/client/assisted',
       });
       return res.json({ order: await orderDto(order, true), notificationQueued: true });
-    } catch (error) {
+    } catch (error: any) {
+      if (
+        error?.message === 'ORDER_STATUS_CONCURRENT_UPDATE'
+        || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+      ) {
+        return res.status(409).json({ message: 'La orden cambió al mismo tiempo. Recarga antes de continuar.' });
+      }
       next(error);
     }
   });
