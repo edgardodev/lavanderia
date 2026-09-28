@@ -424,6 +424,24 @@ export function registerWompiPaymentRoutes(
       if (!transactionMatchesPayment(transaction, payment)) {
         return res.status(409).json({ message: 'El evento no coincide con el pago registrado.' });
       }
+      if (payment.wompiTransactionId && payment.wompiTransactionId !== transactionId) {
+        await prisma.auditLog.create({
+          data: {
+            action: 'WOMPI_TRANSACTION_ID_MISMATCH',
+            entity: 'PAYMENT',
+            entityId: payment.id,
+            metadata: {
+              storedTransactionId: payment.wompiTransactionId,
+              incomingTransactionId: transactionId,
+              reference,
+            },
+          },
+        });
+        return res.status(409).json({ message: 'La transacción no coincide con el intento de pago registrado.' });
+      }
+      if (payment.wompiTransactionId === transactionId && payment.status === status) {
+        return res.status(200).json({ received: true });
+      }
 
       const lateApprovalAfterLocalExpiry = status === PaymentStatus.APPROVED && isLocallyExpiredPayment(payment);
       if (FINAL_PAYMENT_STATUSES.has(payment.status) && !lateApprovalAfterLocalExpiry) {
