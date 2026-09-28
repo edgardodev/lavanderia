@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, ShieldCheck, UserPlus } from 'lucide-react';
 import { AdminDashboardLink } from '@/components/AdminDashboardLink';
 import { AppHeader } from '@/components/AppHeader';
@@ -38,6 +38,9 @@ export default function AdminSecurityPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const activeAdmins = useMemo(() => admins.filter((admin) => admin.isActive), [admins]);
+  const archivedAdmins = useMemo(() => admins.filter((admin) => !admin.isActive), [admins]);
 
   async function createAdmin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -94,7 +97,7 @@ export default function AdminSecurityPage() {
           <Pill>Seguridad</Pill>
           <h1 className="mt-3 font-title text-5xl text-aqua">Accesos administrativos</h1>
           <p className="mt-3 max-w-3xl leading-7 text-slate-600">
-            Las cuentas son individuales. Los nuevos administradores deben cambiar la contraseña temporal y activar MFA antes de poder usar cualquier función administrativa.
+            Cada trabajador usa su propia credencial. El administrador principal puede crear los accesos necesarios; cada persona recibe una contraseña temporal, la cambia en su primer ingreso y configura su propio MFA.
           </p>
         </section>
 
@@ -103,14 +106,14 @@ export default function AdminSecurityPage() {
             <div className="flex items-center gap-3">
               <span className="rounded-2xl bg-aqua/10 p-3 text-aqua"><UserPlus size={22} /></span>
               <div>
-                <h2 className="text-2xl font-black text-slate-950">Crear administrador</h2>
-                <p className="text-sm text-slate-500">Solo disponible para el administrador con permiso de gestión de accesos.</p>
+                <h2 className="text-2xl font-black text-slate-950">Crear credencial de trabajador</h2>
+                <p className="text-sm text-slate-500">Puedes crear 5, 6 o más accesos individuales sin compartir una misma contraseña.</p>
               </div>
             </div>
             <form onSubmit={createAdmin} className="mt-6 grid gap-4">
               <Field label="Nombre completo"><Input name="name" required maxLength={100} autoComplete="off" /></Field>
               <Field label="Correo individual"><Input name="email" type="email" required maxLength={190} autoComplete="off" /></Field>
-              <Button type="submit" disabled={submitting}>{submitting ? 'Creando...' : 'Crear acceso seguro'}</Button>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Creando...' : 'Generar credencial temporal'}</Button>
             </form>
 
             {temporaryPassword && (
@@ -127,38 +130,73 @@ export default function AdminSecurityPage() {
           </Card>
 
           <Card>
-            <div className="flex items-center gap-3">
-              <ShieldCheck className="text-aqua" />
-              <h2 className="text-2xl font-black text-slate-950">Administradores registrados</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="text-aqua" />
+                <div>
+                  <h2 className="text-2xl font-black text-slate-950">Credenciales activas</h2>
+                  <p className="mt-1 text-sm text-slate-500">{activeAdmins.length} cuenta{activeAdmins.length === 1 ? '' : 's'} habilitada{activeAdmins.length === 1 ? '' : 's'}.</p>
+                </div>
+              </div>
             </div>
+
             <div className="mt-6 grid gap-3">
-              {admins.map((admin) => (
+              {activeAdmins.map((admin) => (
                 <div key={admin.id} className="rounded-3xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-black text-slate-950">{admin.name}</p>
                       <p className="mt-1 text-sm text-slate-500">{admin.email}</p>
                       <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-black">
-                        <span className={`rounded-full px-3 py-1 ${admin.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{admin.isActive ? 'Activo' : 'Deshabilitado'}</span>
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Activo</span>
                         <span className={`rounded-full px-3 py-1 ${admin.mfaEnabled ? 'bg-aqua/10 text-aqua' : 'bg-amber-100 text-amber-700'}`}>{admin.mfaEnabled ? 'MFA activo' : 'MFA pendiente'}</span>
                         {admin.mustChangePassword && <span className="rounded-full bg-yellowBrand/40 px-3 py-1 text-slate-700">Debe cambiar contraseña</span>}
-                        {admin.canManageAdmins && <span className="rounded-full bg-slate-950 px-3 py-1 text-white">Gestiona accesos</span>}
+                        {admin.canManageAdmins && <span className="rounded-full bg-slate-950 px-3 py-1 text-white">Admin principal · gestiona accesos</span>}
                       </div>
                       <p className="mt-3 text-xs text-slate-400">Último acceso: {admin.lastLoginAt ? formatDateTime(admin.lastLoginAt) : 'Nunca'}</p>
                       {admin.lockedUntil && <p className="mt-1 text-xs font-bold text-rose-600">Bloqueada hasta: {formatDateTime(admin.lockedUntil)}</p>}
                     </div>
                     <button
                       type="button"
-                      onClick={() => void setActive(admin, !admin.isActive)}
-                      className={`rounded-full px-4 py-2 text-xs font-black ${admin.isActive ? 'border border-rose-200 text-rose-700' : 'bg-aqua text-white'}`}
+                      onClick={() => void setActive(admin, false)}
+                      className="rounded-full border border-rose-200 px-4 py-2 text-xs font-black text-rose-700"
                     >
-                      {admin.isActive ? 'Deshabilitar' : 'Habilitar'}
+                      Deshabilitar
                     </button>
                   </div>
                 </div>
               ))}
-              {admins.length === 0 && !error && <p className="text-sm font-bold text-slate-500">No hay administradores visibles.</p>}
+              {activeAdmins.length === 0 && !error && <p className="text-sm font-bold text-slate-500">No hay credenciales administrativas activas.</p>}
             </div>
+
+            {archivedAdmins.length > 0 && (
+              <details className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <summary className="cursor-pointer list-none text-sm font-black text-slate-700">
+                  Cuentas archivadas · {archivedAdmins.length}
+                  <span className="ml-2 text-xs font-bold text-slate-400">Deshabilitadas; se conservan por auditoría</span>
+                </summary>
+                <div className="mt-4 grid gap-3">
+                  {archivedAdmins.map((admin) => (
+                    <div key={admin.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-slate-800">{admin.name}</p>
+                          <p className="mt-1 text-sm text-slate-500">{admin.email}</p>
+                          <p className="mt-2 text-xs font-bold text-slate-400">Deshabilitada · último acceso: {admin.lastLoginAt ? formatDateTime(admin.lastLoginAt) : 'Nunca'}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void setActive(admin, true)}
+                          className="rounded-full bg-aqua px-4 py-2 text-xs font-black text-white"
+                        >
+                          Habilitar nuevamente
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </Card>
         </div>
 
