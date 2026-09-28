@@ -47,21 +47,26 @@ export function EvidenceUploader({ orderId, onUploaded }: { orderId: string; onU
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [storageReady, setStorageReady] = useState<boolean | null>(null);
+  const [localStorageMode, setLocalStorageMode] = useState(false);
   const previews = useMemo(() => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) })), [files]);
 
   useEffect(() => () => previews.forEach((preview) => URL.revokeObjectURL(preview.url)), [previews]);
 
   useEffect(() => {
-    apiFetch<{ firebaseStorage: boolean }>('/admin/capabilities')
+    apiFetch<{ firebaseStorage: boolean; evidenceStorage: boolean; localEvidenceStorage: boolean }>('/admin/capabilities')
       .then((data) => {
-        setStorageReady(data.firebaseStorage);
-        if (!data.firebaseStorage) {
+        setStorageReady(data.evidenceStorage);
+        setLocalStorageMode(data.localEvidenceStorage);
+        if (!data.evidenceStorage) {
           setFiles([]);
           setMessage('');
           setError('');
         }
       })
-      .catch(() => setStorageReady(false));
+      .catch(() => {
+        setStorageReady(false);
+        setLocalStorageMode(false);
+      });
   }, []);
 
   async function selectFiles(selected: File[]) {
@@ -147,9 +152,14 @@ export function EvidenceUploader({ orderId, onUploaded }: { orderId: string; onU
         {processing ? 'Comprimiendo...' : uploading ? 'Subiendo...' : 'Guardar evidencia y notificar'}
       </button>
       {storageReady === null && <p className="text-xs font-bold text-slate-500">Comprobando almacenamiento privado...</p>}
+      {storageReady === true && localStorageMode && (
+        <p className="rounded-2xl bg-sky-50 px-3 py-2 text-xs font-bold leading-5 text-sky-800">
+          Modo local de desarrollo: las fotos se guardan de forma privada en este backend para probar el flujo. Producción seguirá exigiendo Firebase Storage.
+        </p>
+      )}
       {storageReady === false && (
         <p className="rounded-2xl bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
-          Evidencias deshabilitadas en este entorno. Configura Firebase Storage en el backend para habilitar la carga privada de fotos.
+          Evidencias deshabilitadas. Configura Firebase Storage en producción o habilita almacenamiento local únicamente durante desarrollo.
         </p>
       )}
       {message && <p className="text-xs font-bold text-emerald-700">{message}</p>}
