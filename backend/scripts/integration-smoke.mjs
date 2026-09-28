@@ -155,7 +155,14 @@ async function main() {
   assert(firstAdminLogin.data?.setupRequired && admin.get('admin_preauth'), 'Bootstrap admin no inició configuración segura.');
   const status = await api(admin, '/auth/admin/security/status');
   assert(status.data?.mustChangePassword === true, 'Bootstrap admin no exige cambio de contraseña.');
+  assert(admin.get('csrf_token'), 'Preautenticación admin no entregó token CSRF.');
 
+  await api(admin, '/auth/admin/security/password', {
+    method: 'POST',
+    expected: [403],
+    headers: { 'X-CSRF-Token': 'invalid-preauth-csrf' },
+    body: { password: randomPassword() },
+  });
   await api(admin, '/auth/admin/security/password', { method: 'POST', body: { password: randomPassword() } });
   const mfa = await api(admin, '/auth/admin/security/mfa');
   assert(mfa.data?.secret, 'No se generó secreto MFA.');
@@ -164,7 +171,12 @@ async function main() {
 
   await api(admin, '/admin/clients');
   await api(admin, '/admin/reservations');
+  const summary = await api(admin, '/admin/dashboard-summary');
+  assert(typeof summary.data?.metrics?.activeOrders === 'number', 'Dashboard admin no devolvió métricas operativas.');
+
   const adminOrders = await api(admin, '/admin/orders');
+  const searchedOrders = await api(admin, `/admin/orders?search=${encodeURIComponent(clientEmail)}&limit=10`);
+  assert(searchedOrders.data?.orders?.some((o) => o.id === order1.data.order.id), 'Filtro server-side de órdenes no encontró al cliente esperado.');
   const pendingQuote = adminOrders.data?.orders?.find((o) => o.id === order1.data.order.id);
   assert(pendingQuote && pendingQuote.pricingReady === false, 'La orden variable debería iniciar pendiente de cotización.');
 
@@ -206,8 +218,17 @@ async function main() {
     data: { paymentId: approvedPayment.id },
   });
 
-  const advanced = await api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', body: { status: 'PRE_WASH' } });
-  assert(advanced.data?.order?.status === 'PRE_WASH', 'Admin no pudo avanzar orden pagada.');
+  const concurrentTransitions = await Promise.all([
+    api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [200, 409], body: { status: 'PRE_WASH' } }),
+    api(admin, `/admin/orders/${order1.data.order.id}/status`, { method: 'PATCH', expected: [200, 409], body: { status: 'PRE_WASH' } }),
+  ]);
+  const transitionStatuses = concurrentTransitions.map((result) => result.status).sort();
+  assert(
+    transitionStatuses[0] === 200 && transitionStatuses[1] === 409,
+    'La transición concurrente debería aceptar exactamente una actualización.',
+  );
+  const advanced = concurrentTransitions.find((result) => result.status === 200);
+  assert(advanced?.data?.order?.status === 'PRE_WASH', 'Admin no pudo avanzar orden pagada.');
   await api(admin, `/admin/orders/${order1.data.order.id}/messages`, { method: 'POST', expected: [201], body: { message: 'Mensaje smoke visible al cliente.', isInternal: false } });
 
   const clientOrders = await api(client, '/client/orders');
@@ -215,7 +236,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'csrf', 'variable-pricing', 'payment-gate', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()
