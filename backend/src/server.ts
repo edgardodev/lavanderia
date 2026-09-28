@@ -7,14 +7,12 @@ import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
 import {
-  CycleType,
   MachineSlotType,
   OrderStatus,
   Prisma,
   PrismaClient,
   ReservationStatus,
   Role,
-  ServiceMode,
 } from '@prisma/client';
 import {
   apiLimiter,
@@ -147,17 +145,6 @@ const allowedOrigins = new Set([
       ]),
 ]);
 
-const selfServicePrices: Record<CycleType, number> = {
-  WASH: 18000,
-  DRY: 18000,
-  FULL: 36000,
-};
-
-const doneForYouPrices: Record<CycleType, number> = {
-  WASH: 22000,
-  DRY: 22000,
-  FULL: 44000,
-};
 
 if (isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -233,9 +220,6 @@ app.use((req, res, next) => {
   next();
 });
 
-function toWompiCents(amountInCop: number) {
-  return amountInCop * 100;
-}
 
 async function requireUser(
   req: express.Request,
