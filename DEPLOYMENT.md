@@ -23,6 +23,8 @@ El backend aplica límites propios para no acumular trabajo indefinidamente:
 - evidencia: máximo 4 archivos de 5 MiB cada uno.
 - concurrencia global por instancia: `MAX_CONCURRENT_REQUESTS` (120 por defecto).
 - concurrencia de evidencias: `MAX_CONCURRENT_UPLOADS` (6 por defecto).
+- retención de una máquina sin pago: `RESERVATION_HOLD_MINUTES` (15 minutos por defecto).
+- reservas futuras pendientes de pago por cliente: `MAX_PENDING_RESERVATIONS_PER_CLIENT` (3 por defecto).
 
 Configure el timeout del proxy un poco por encima del timeout HTTP de la aplicación (por ejemplo, 65 s) y un body máximo de aproximadamente 22 MiB para permitir cuatro imágenes de 5 MiB más multipart overhead. No use un límite ilimitado.
 
@@ -79,6 +81,7 @@ Primero pruebe Sandbox de extremo a extremo: pago aprobado, rechazado, PSE pendi
 - El redirect de checkout debe apuntar a `/client/payment-return`; esa pantalla es informativa y nunca se toma como confirmación de pago.
 - Wompi tiene timeout de red interno (`WOMPI_HTTP_TIMEOUT_MS`, 8 s por defecto).
 - El backend nunca confía únicamente en el redirect del navegador.
+- Los webhooks repetidos se procesan de forma idempotente; un pago no puede cambiar silenciosamente de ID de transacción Wompi y el primer evento observado de una transacción se contrasta directamente con la API de Wompi.
 - Los estados finales de pago no se regresan a `PENDING` por eventos tardíos. Si llega un pago aprobado cuando una reserva ya perdió su bloqueo, se conserva el pago para conciliación y se registra `WOMPI_LATE_PAYMENT_EVENT` con revisión manual en vez de reactivar una reserva sin cupo.
 - Una orden “Lo hacemos por ti” no puede iniciar ni avanzar etapas operativas hasta que el pago asociado esté `APPROVED`.
 
