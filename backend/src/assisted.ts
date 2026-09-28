@@ -158,7 +158,7 @@ async function evidenceDto(photo: any, includeSignedUrl = false) {
 }
 
 async function orderDto(order: any, includeInternal: boolean) {
-  const evidence = await Promise.all((order.evidencePhotos ?? []).map((photo: any) => evidenceDto(photo, false)));
+  const evidence = await Promise.all([...(order.evidencePhotos ?? [])].reverse().map((photo: any) => evidenceDto(photo, false)));
   return {
     id: order.id,
     branchId: order.branchId,
