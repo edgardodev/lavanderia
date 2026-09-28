@@ -201,13 +201,28 @@ async function main() {
     'Las sesiones admin/cliente no pueden coexistir en el mismo navegador.',
   );
   await api(combinedBrowser, '/admin/clients');
-  await api(combinedBrowser, '/client/orders');
+  await api(combinedBrowser, '/client/orders?view=active');
+
+  await api(combinedBrowser, '/auth/logout?role=client', { method: 'POST', expected: [204] });
+  const adminAfterClientLogout = await api(combinedBrowser, '/auth/session?role=admin');
+  assert(adminAfterClientLogout.data?.user?.role === 'ADMIN', 'Cerrar la sesión cliente cerró también la sesión administrativa.');
+  await api(combinedBrowser, '/auth/session?role=client', { expected: [401] });
+  await api(combinedBrowser, `/admin/orders/${order1.data.order.id}/status`, {
+    method: 'PATCH',
+    expected: [403],
+    headers: { 'X-CSRF-Token': 'invalid-role-cookie-csrf' },
+    body: { status: 'PRE_WASH' },
+  });
 
   const summary = await api(admin, '/admin/dashboard-summary');
   assert(typeof summary.data?.metrics?.activeOrders === 'number', 'Dashboard admin no devolvió métricas operativas.');
 
-  const adminOrders = await api(admin, '/admin/orders');
-  const searchedOrders = await api(admin, `/admin/orders?search=${encodeURIComponent(clientEmail)}&limit=10`);
+  const adminOrders = await api(admin, '/admin/orders?view=active');
+  const adminHistory = await api(admin, '/admin/orders?view=history&limit=10');
+  assert(Array.isArray(adminHistory.data?.orders), 'La vista de historial administrativo no respondió correctamente.');
+  const clientHistory = await api(client, '/client/orders?view=history&limit=10');
+  assert(Array.isArray(clientHistory.data?.orders), 'La vista de historial del cliente no respondió correctamente.');
+  const searchedOrders = await api(admin, `/admin/orders?view=active&search=${encodeURIComponent(clientEmail)}&limit=10`);
   assert(searchedOrders.data?.orders?.some((o) => o.id === order1.data.order.id), 'Filtro server-side de órdenes no encontró al cliente esperado.');
   const pendingQuote = adminOrders.data?.orders?.find((o) => o.id === order1.data.order.id);
   assert(pendingQuote && pendingQuote.pricingReady === false, 'La orden variable debería iniciar pendiente de cotización.');
@@ -268,7 +283,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'role-isolated-sessions', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'role-isolated-sessions', 'role-cookie-csrf', 'active-history-views', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()

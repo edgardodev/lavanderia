@@ -66,9 +66,17 @@ export default function AssistedPage() {
 
   const loadOrders = useCallback(async () => {
     try {
-      const data = await apiFetch<{ orders: LaundryOrder[] }>('/client/orders');
-      setOrders(data.orders);
-      setSelectedOrderId((current) => current ?? data.orders.find((order) => !['DELIVERED', 'CANCELLED'].includes(order.status))?.id ?? data.orders[0]?.id ?? null);
+      const [activeData, historyData] = await Promise.all([
+        apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=active&limit=20'),
+        apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=history&limit=24'),
+      ]);
+      const nextOrders = [...activeData.orders, ...historyData.orders];
+      setOrders(nextOrders);
+      setSelectedOrderId((current) => (
+        current && nextOrders.some((order) => order.id === current)
+          ? current
+          : activeData.orders[0]?.id ?? historyData.orders[0]?.id ?? null
+      ));
       setHistoryError('');
     } catch (err) {
       setHistoryError(err instanceof Error ? err.message : 'No se pudo cargar el seguimiento de tus servicios.');
@@ -93,9 +101,17 @@ export default function AssistedPage() {
     };
   }, [loadOrders]);
 
+  const activeOrders = useMemo(
+    () => orders.filter((order) => !['DELIVERED', 'CANCELLED'].includes(order.status)),
+    [orders],
+  );
+  const pastOrders = useMemo(
+    () => orders.filter((order) => ['DELIVERED', 'CANCELLED'].includes(order.status)),
+    [orders],
+  );
   const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) ?? orders.find((order) => !['DELIVERED', 'CANCELLED'].includes(order.status)) ?? orders[0],
-    [orders, selectedOrderId],
+    () => orders.find((order) => order.id === selectedOrderId) ?? activeOrders[0] ?? pastOrders[0],
+    [orders, selectedOrderId, activeOrders, pastOrders],
   );
 
   const createdOrder = useMemo(
@@ -246,17 +262,68 @@ export default function AssistedPage() {
           </Card>
 
           <Card>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-black text-slate-950">Mis servicios asistidos</h2>
-                <p className="mt-1 text-sm text-slate-500">Historial y novedades de los servicios de esta modalidad.</p>
-              </div>
-              {orders.length > 1 && (
-                <Select value={selectedOrder?.id ?? ''} onChange={(event) => setSelectedOrderId(event.target.value)} className="max-w-xs">
-                  {orders.map((order) => <option key={order.id} value={order.id}>{branchName(order)} · {formatDateTime(order.createdAt)}</option>)}
-                </Select>
-              )}
+            <div>
+              <h2 className="text-2xl font-black text-slate-950">Mis servicios asistidos</h2>
+              <p className="mt-1 text-sm text-slate-500">Primero aparecen los servicios que todavía requieren atención. Los finalizados quedan guardados en Historial.</p>
             </div>
+
+            {!historyLoading && (
+              <div className="mt-5 grid gap-4">
+                <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-black uppercase tracking-wide text-aqua">Activos</p>
+                    <span className="rounded-full bg-aqua/10 px-3 py-1 text-xs font-black text-aqua">{activeOrders.length}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {activeOrders.map((order) => (
+                      <button
+                        key={order.id}
+                        type="button"
+                        onClick={() => setSelectedOrderId(order.id)}
+                        className={`rounded-3xl border p-4 text-left transition ${selectedOrder?.id === order.id ? 'border-aqua bg-aqua/10' : 'border-slate-200 bg-white hover:border-aqua/40'}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="font-black text-slate-950">{branchName(order)} · {cycleLabels[order.cycleType]}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">{formatDateTime(order.createdAt)}</p>
+                          </div>
+                          <StatusBadge status={order.status} />
+                        </div>
+                      </button>
+                    ))}
+                    {activeOrders.length === 0 && (
+                      <p className="rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-500">No tienes servicios asistidos activos en este momento.</p>
+                    )}
+                  </div>
+                </div>
+
+                <details className="rounded-3xl border border-slate-200 bg-slate-50/60 p-4">
+                  <summary className="cursor-pointer list-none font-black text-slate-800">
+                    Historial · {pastOrders.length} servicio{pastOrders.length === 1 ? '' : 's'}
+                    <span className="ml-2 text-xs font-bold text-slate-400">Toca para ver anteriores</span>
+                  </summary>
+                  <div className="mt-4 grid gap-2">
+                    {pastOrders.map((order) => (
+                      <button
+                        key={order.id}
+                        type="button"
+                        onClick={() => setSelectedOrderId(order.id)}
+                        className={`rounded-2xl border p-3 text-left transition ${selectedOrder?.id === order.id ? 'border-aqua bg-white' : 'border-slate-200 bg-white/70 hover:border-aqua/40'}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-slate-900">{branchName(order)} · {cycleLabels[order.cycleType]}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">{formatDateTime(order.createdAt)}</p>
+                          </div>
+                          <StatusBadge status={order.status} />
+                        </div>
+                      </button>
+                    ))}
+                    {pastOrders.length === 0 && <p className="text-sm font-bold text-slate-400">Todavía no hay servicios anteriores.</p>}
+                  </div>
+                </details>
+              </div>
+            )}
 
             {historyError && <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{historyError}</p>}
             {historyLoading ? (

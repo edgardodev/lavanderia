@@ -76,8 +76,10 @@ export function mutationGuard(allowedOrigins: Set<string>) {
     if (isSessionlessMutation(req.path)) return next();
 
     const authCookie = String(req.cookies?.auth_token ?? '');
+    const adminAuthCookie = String(req.cookies?.admin_auth_token ?? '');
+    const clientAuthCookie = String(req.cookies?.client_auth_token ?? '');
     const adminPreauthCookie = String(req.cookies?.admin_preauth ?? '');
-    if (!authCookie && !adminPreauthCookie) return next();
+    if (!authCookie && !adminAuthCookie && !clientAuthCookie && !adminPreauthCookie) return next();
 
     const cookieToken = String(req.cookies?.csrf_token ?? '');
     const headerToken = String(req.get('X-CSRF-Token') ?? '');

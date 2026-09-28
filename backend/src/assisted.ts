@@ -27,6 +27,11 @@ const statusSequence: OrderStatus[] = [
   OrderStatus.DELIVERED,
 ];
 
+const TERMINAL_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.DELIVERED,
+  OrderStatus.CANCELLED,
+];
+
 function statusCopy(status: OrderStatus, pickupType: string) {
   switch (status) {
     case OrderStatus.QUEUED:
@@ -230,13 +235,48 @@ export function registerAssistedRoutes(
     try {
       const user = await requireUser(req, res, Role.CLIENT);
       if (!user) return;
+
+      const view = String(req.query.view ?? 'active').trim();
+      const limit = boundedLimit(req.query.limit, 20, 100);
+      if (!['active', 'history', 'all'].includes(view)) {
+        return res.status(400).json({ message: 'Vista inválida.' });
+      }
+
+      const where: Prisma.LaundryOrderWhereInput = {
+        clientId: user.id,
+        ...(view === 'active'
+          ? { status: { notIn: TERMINAL_ORDER_STATUSES } }
+          : view === 'history'
+            ? { status: { in: TERMINAL_ORDER_STATUSES } }
+            : {}),
+      };
       const orders = await prisma.laundryOrder.findMany({
-        where: { clientId: user.id },
+        where,
         include: orderInclude,
         orderBy: { createdAt: 'desc' },
-        take: 100,
+        take: limit,
       });
-      return res.json({ orders: await Promise.all(orders.map((order) => orderDto(order, false))) });
+      return res.json({
+        orders: await Promise.all(orders.map((order) => orderDto(order, false))),
+        limit,
+        truncated: orders.length === limit,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/client/orders/:orderId', async (req, res, next) => {
+    try {
+      const user = await requireUser(req, res, Role.CLIENT);
+      if (!user) return;
+      const orderId = safeId(req.params.orderId, 'Orden');
+      const order = await prisma.laundryOrder.findFirst({
+        where: { id: orderId, clientId: user.id },
+        include: orderInclude,
+      });
+      if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
+      return res.json({ order: await orderDto(order, false) });
     } catch (error) {
       next(error);
     }
@@ -307,16 +347,26 @@ export function registerAssistedRoutes(
 
       const branchId = optionalFilterId(req.query.branchId, 'Sede');
       const rawStatus = String(req.query.status ?? 'all').trim();
+      const view = String(req.query.view ?? 'active').trim();
       const search = boundedQueryText(req.query.search, 120);
       const limit = boundedLimit(req.query.limit, 50, 100);
       const status = rawStatus === 'all' ? undefined : rawStatus as OrderStatus;
       if (status && !Object.values(OrderStatus).includes(status)) {
         return res.status(400).json({ message: 'Estado inválido.' });
       }
+      if (!['active', 'history', 'all'].includes(view)) {
+        return res.status(400).json({ message: 'Vista inválida.' });
+      }
 
       const where: Prisma.LaundryOrderWhereInput = {
         ...(branchId !== 'all' ? { branchId } : {}),
-        ...(status ? { status } : {}),
+        ...(status
+          ? { status }
+          : view === 'active'
+            ? { status: { notIn: TERMINAL_ORDER_STATUSES } }
+            : view === 'history'
+              ? { status: { in: TERMINAL_ORDER_STATUSES } }
+              : {}),
         ...(search
           ? {
               client: {
@@ -343,6 +393,22 @@ export function registerAssistedRoutes(
         limit,
         truncated: orders.length === limit,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/admin/orders/:orderId', async (req, res, next) => {
+    try {
+      const admin = await requireUser(req, res, Role.ADMIN);
+      if (!admin) return;
+      const orderId = safeId(req.params.orderId, 'Orden');
+      const order = await prisma.laundryOrder.findUnique({
+        where: { id: orderId },
+        include: orderInclude,
+      });
+      if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
+      return res.json({ order: await orderDto(order, true) });
     } catch (error) {
       next(error);
     }
