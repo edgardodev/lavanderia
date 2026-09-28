@@ -29,7 +29,7 @@ import { registerWompiPaymentRoutes } from './payments.js';
 import { registerAssistedRoutes } from './assisted.js';
 import { registerIdempotentClientServiceRoutes } from './client-services.js';
 import { businessDaySchedule } from './business-calendar.js';
-import { isoDate, optionalFilterId, RequestValidationError, safeId, timeSlot } from './validation.js';
+import { boundedLimit, isoDate, optionalFilterId, RequestValidationError, safeId, timeSlot } from './validation.js';
 
 assertProductionSecrets();
 
@@ -61,6 +61,20 @@ const prisma = new PrismaClient({
   },
 });
 const app = express();
+
+const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.QUEUED,
+  OrderStatus.PRE_WASH,
+  OrderStatus.WASHING,
+  OrderStatus.DRYING,
+  OrderStatus.PREPARING,
+  OrderStatus.READY,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
+const ACTIVE_RESERVATION_STATUSES: ReservationStatus[] = [
+  ReservationStatus.PENDING_PAYMENT,
+  ReservationStatus.CONFIRMED,
+];
 
 app.use((req, res, next) => {
   if (req.originalUrl.length > 4096) {
@@ -406,27 +420,17 @@ app.get('/api/admin/dashboard-summary', async (req, res, next) => {
     const branchId = optionalFilterId(req.query.branchId, 'Sede');
     const branchWhere = branchId === 'all' ? {} : { branchId };
     const now = new Date();
-    const activeOrderStatuses = [
-      OrderStatus.QUEUED,
-      OrderStatus.PRE_WASH,
-      OrderStatus.WASHING,
-      OrderStatus.DRYING,
-      OrderStatus.PREPARING,
-      OrderStatus.READY,
-      OrderStatus.OUT_FOR_DELIVERY,
-    ];
-
     const [orders, reservations, blockedMachines, activeClients] = await Promise.all([
       prisma.laundryOrder.count({
         where: {
           ...branchWhere,
-          status: { in: activeOrderStatuses },
+          status: { in: ACTIVE_ORDER_STATUSES },
         },
       }),
       prisma.reservation.count({
         where: {
           ...branchWhere,
-          status: { in: [ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED] },
+          status: { in: ACTIVE_RESERVATION_STATUSES },
           scheduledEnd: { gt: now },
         },
       }),
@@ -446,7 +450,7 @@ app.get('/api/admin/dashboard-summary', async (req, res, next) => {
               laundryOrders: {
                 some: {
                   ...branchWhere,
-                  status: { in: activeOrderStatuses },
+                  status: { in: ACTIVE_ORDER_STATUSES },
                 },
               },
             },
@@ -454,7 +458,7 @@ app.get('/api/admin/dashboard-summary', async (req, res, next) => {
               reservations: {
                 some: {
                   ...branchWhere,
-                  status: { in: [ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED] },
+                  status: { in: ACTIVE_RESERVATION_STATUSES },
                   scheduledEnd: { gt: now },
                 },
               },
@@ -471,6 +475,235 @@ app.get('/api/admin/dashboard-summary', async (req, res, next) => {
         blockedMachines,
         activeClients,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/admin/dashboard-activity', async (req, res, next) => {
+  try {
+    const admin = await requireUser(req, res, Role.ADMIN);
+    if (!admin) return;
+
+    const type = String(req.query.type ?? '').trim();
+    if (!['orders', 'reservations', 'blocks', 'clients'].includes(type)) {
+      return res.status(400).json({ message: 'Tipo de actividad inválido.' });
+    }
+
+    const branchId = optionalFilterId(req.query.branchId, 'Sede');
+    const limit = boundedLimit(req.query.limit, 25, 50);
+    const branchWhere = branchId === 'all' ? {} : { branchId };
+    const now = new Date();
+
+    if (type === 'orders') {
+      const items = await prisma.laundryOrder.findMany({
+        where: {
+          ...branchWhere,
+          status: { in: ACTIVE_ORDER_STATUSES },
+        },
+        select: {
+          id: true,
+          status: true,
+          pickupType: true,
+          createdAt: true,
+          updatedAt: true,
+          client: { select: { id: true, name: true, email: true } },
+          branch: { select: { id: true, name: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+      });
+      return res.json({
+        type,
+        items: items.map((item) => ({
+          kind: 'ORDER',
+          id: item.id,
+          status: item.status,
+          pickupType: item.pickupType,
+          createdAt: item.createdAt.toISOString(),
+          updatedAt: item.updatedAt.toISOString(),
+          client: item.client,
+          branch: item.branch,
+        })),
+        truncated: items.length === limit,
+      });
+    }
+
+    if (type === 'reservations') {
+      const items = await prisma.reservation.findMany({
+        where: {
+          ...branchWhere,
+          status: { in: ACTIVE_RESERVATION_STATUSES },
+          scheduledEnd: { gt: now },
+        },
+        select: {
+          id: true,
+          status: true,
+          scheduledStart: true,
+          scheduledEnd: true,
+          createdAt: true,
+          client: { select: { id: true, name: true, email: true } },
+          branch: { select: { id: true, name: true } },
+          machine: { select: { id: true, code: true } },
+          payment: { select: { status: true } },
+        },
+        orderBy: [{ scheduledStart: 'asc' }, { createdAt: 'desc' }],
+        take: limit,
+      });
+      return res.json({
+        type,
+        items: items.map((item) => ({
+          kind: 'RESERVATION',
+          id: item.id,
+          status: item.status,
+          paymentStatus: item.payment?.status ?? null,
+          date: formatBogotaDate(item.scheduledStart),
+          slot: slotFromRange(item),
+          createdAt: item.createdAt.toISOString(),
+          client: item.client,
+          branch: item.branch,
+          machine: item.machine,
+        })),
+        truncated: items.length === limit,
+      });
+    }
+
+    if (type === 'blocks') {
+      const items = await prisma.machineSlot.findMany({
+        where: {
+          ...branchWhere,
+          type: MachineSlotType.ADMIN_BLOCK,
+          scheduledEnd: { gt: now },
+        },
+        select: {
+          id: true,
+          scheduledStart: true,
+          scheduledEnd: true,
+          reason: true,
+          createdAt: true,
+          branch: { select: { id: true, name: true } },
+          machine: { select: { id: true, code: true } },
+          admin: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: [{ scheduledStart: 'asc' }, { createdAt: 'desc' }],
+        take: limit,
+      });
+      return res.json({
+        type,
+        items: items.map((item) => ({
+          kind: 'BLOCK',
+          id: item.id,
+          date: formatBogotaDate(item.scheduledStart),
+          slot: slotFromRange(item),
+          reason: item.reason ?? 'Bloqueo administrativo',
+          createdAt: item.createdAt.toISOString(),
+          branch: item.branch,
+          machine: item.machine,
+          admin: item.admin,
+        })),
+        truncated: items.length === limit,
+      });
+    }
+
+    const clients = await prisma.user.findMany({
+      where: {
+        role: Role.CLIENT,
+        isActive: true,
+        OR: [
+          {
+            laundryOrders: {
+              some: {
+                ...branchWhere,
+                status: { in: ACTIVE_ORDER_STATUSES },
+              },
+            },
+          },
+          {
+            reservations: {
+              some: {
+                ...branchWhere,
+                status: { in: ACTIVE_RESERVATION_STATUSES },
+                scheduledEnd: { gt: now },
+              },
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        updatedAt: true,
+        laundryOrders: {
+          where: {
+            ...branchWhere,
+            status: { in: ACTIVE_ORDER_STATUSES },
+          },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            branch: { select: { id: true, name: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 1,
+        },
+        reservations: {
+          where: {
+            ...branchWhere,
+            status: { in: ACTIVE_RESERVATION_STATUSES },
+            scheduledEnd: { gt: now },
+          },
+          select: {
+            id: true,
+            status: true,
+            scheduledStart: true,
+            scheduledEnd: true,
+            createdAt: true,
+            branch: { select: { id: true, name: true } },
+            machine: { select: { id: true, code: true } },
+          },
+          orderBy: { scheduledStart: 'asc' },
+          take: 1,
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+    });
+
+    return res.json({
+      type,
+      items: clients.map((client) => ({
+        kind: 'CLIENT',
+        id: client.id,
+        name: client.name,
+        email: client.email,
+        phone: client.phone ?? null,
+        activeOrder: client.laundryOrders[0]
+          ? {
+              id: client.laundryOrders[0].id,
+              status: client.laundryOrders[0].status,
+              createdAt: client.laundryOrders[0].createdAt.toISOString(),
+              updatedAt: client.laundryOrders[0].updatedAt.toISOString(),
+              branch: client.laundryOrders[0].branch,
+            }
+          : null,
+        activeReservation: client.reservations[0]
+          ? {
+              id: client.reservations[0].id,
+              status: client.reservations[0].status,
+              date: formatBogotaDate(client.reservations[0].scheduledStart),
+              slot: slotFromRange(client.reservations[0]),
+              createdAt: client.reservations[0].createdAt.toISOString(),
+              branch: client.reservations[0].branch,
+              machine: client.reservations[0].machine,
+            }
+          : null,
+      })),
+      truncated: clients.length === limit,
     });
   } catch (error) {
     next(error);
