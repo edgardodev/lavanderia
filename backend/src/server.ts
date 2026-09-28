@@ -202,6 +202,8 @@ app.use((req, res, next) => {
   if (
     req.cookies?.auth_token
     || req.cookies?.admin_preauth
+    || req.path.startsWith('/api/auth/')
+    || req.path.startsWith('/api/account/')
     || req.path.startsWith('/api/admin/')
     || req.path.startsWith('/api/client/')
   ) {
