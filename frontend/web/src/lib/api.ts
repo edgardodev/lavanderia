@@ -21,16 +21,21 @@ function getCookie(name: string) {
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
+  const method = String(options.method ?? 'GET').toUpperCase();
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-  if (!isFormData) headers.set('Content-Type', 'application/json');
+  if (options.body !== undefined && !isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const csrf = getCookie('csrf_token');
-  if (csrf) headers.set('X-CSRF-Token', csrf);
+  if (isMutation && csrf) headers.set('X-CSRF-Token', csrf);
 
   const controller = new AbortController();
   const timeoutMs = isFormData ? 45_000 : 20_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
-  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
 
   let response: Response;
   try {
