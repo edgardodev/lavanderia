@@ -50,7 +50,10 @@ export default function AdminClientsPage() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const timer = window.setInterval(refreshIfVisible, 5 * 60 * 1000);
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
     return () => {
