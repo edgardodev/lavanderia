@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiUrl } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { statusLabels } from '@/lib/constants';
 import type { LaundryOrder, OrderEvidence } from '@/types';
@@ -81,17 +81,20 @@ export function ClientOrderHistory({ order, onChanged }: { order: LaundryOrder; 
           <h3 className="text-lg font-black text-slate-950">Fotos de evidencia</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">Los enlaces de las fotos son temporales y solo se generan después de validar tu sesión.</p>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {evidence.map((photo) => (
-              <figure key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                {photo.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.description} className="h-32 w-full object-cover" loading="lazy" /></a>
-                ) : (
-                  <div className="grid h-32 place-items-center bg-slate-100 px-3 text-center text-xs font-bold text-slate-400">Foto temporalmente no disponible</div>
-                )}
-                <figcaption className="p-3 text-xs font-bold leading-5 text-slate-600">{photo.description}</figcaption>
-              </figure>
-            ))}
+            {evidence.map((photo) => {
+              const photoUrl = photo.url ? apiUrl(photo.url) : '';
+              return (
+                <figure key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                  {photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <a href={photoUrl} target="_blank" rel="noreferrer"><img src={photoUrl} alt={photo.description} className="h-32 w-full object-cover" loading="lazy" /></a>
+                  ) : (
+                    <div className="grid h-32 place-items-center bg-slate-100 px-3 text-center text-xs font-bold text-slate-400">Foto temporalmente no disponible</div>
+                  )}
+                  <figcaption className="p-3 text-xs font-bold leading-5 text-slate-600">{photo.description}</figcaption>
+                </figure>
+              );
+            })}
           </div>
           {evidenceError && <p className="mt-2 text-xs font-bold text-amber-700">{evidenceError}</p>}
         </div>
