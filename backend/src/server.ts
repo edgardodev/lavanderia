@@ -117,6 +117,11 @@ const upload = multer({
 const port = boundedInt(process.env.PORT, 4000, 1, 65535);
 const isProduction = process.env.NODE_ENV === 'production';
 
+function publicRouteError(error: unknown, fallback: string) {
+  if (isProduction) return fallback;
+  return error instanceof Error ? error.message : fallback;
+}
+
 function normalizeOrigin(value: string) {
   const url = new URL(value.trim());
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Origen web inválido.');
@@ -379,7 +384,7 @@ app.get('/api/calendar/day', async (req, res) => {
     const date = isoDate(req.query.date);
     return res.json(await businessDaySchedule(prisma, date));
   } catch (error: any) {
-    return res.status(400).json({ message: error?.message ?? 'No se pudo consultar el horario del día.' });
+    return res.status(400).json({ message: publicRouteError(error, 'No se pudo consultar el horario del día.') });
   }
 });
 
@@ -520,7 +525,7 @@ app.get('/api/reservations/availability', async (req, res) => {
         .map((machine) => ({ id: machine.id, code: machine.code })),
     });
   } catch (error: any) {
-    return res.status(400).json({ message: error?.message ?? 'No se pudo consultar disponibilidad.' });
+    return res.status(400).json({ message: publicRouteError(error, 'No se pudo consultar disponibilidad.') });
   }
 });
 
@@ -636,7 +641,7 @@ app.post('/api/admin/machine-blocks', async (req, res) => {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return res.status(409).json({ message: 'Esa máquina ya está reservada o bloqueada en esa franja.' });
     }
-    return res.status(400).json({ message: error?.message ?? 'No se pudo bloquear la máquina.' });
+    return res.status(400).json({ message: publicRouteError(error, 'No se pudo bloquear la máquina.') });
   }
 });
 
