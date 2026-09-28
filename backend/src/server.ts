@@ -710,7 +710,7 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   if (err instanceof RequestValidationError) {
     return res.status(400).json({ message: err.message });
   }
-  if (err instanceof SyntaxError && err?.status === 400) {
+  if (err instanceof SyntaxError && (err as { status?: number }).status === 400) {
     return res.status(400).json({ message: 'El cuerpo JSON de la solicitud es inválido.' });
   }
   if (err?.type === 'entity.too.large' || err?.status === 413) {
