@@ -690,6 +690,17 @@ app.post('/api/notifications/token', async (req, res, next) => {
       update: { lastSeenAt: new Date(), deviceType },
       create: { userId: user.id, token, deviceType },
     });
+
+    const staleTokens = await prisma.pushToken.findMany({
+      where: { userId: user.id },
+      orderBy: { lastSeenAt: 'desc' },
+      skip: 10,
+      select: { id: true },
+    });
+    if (staleTokens.length) {
+      await prisma.pushToken.deleteMany({ where: { id: { in: staleTokens.map((item) => item.id) } } });
+    }
+
     return res.status(204).send();
   } catch (error) {
     next(error);
