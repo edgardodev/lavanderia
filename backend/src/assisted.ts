@@ -265,6 +265,29 @@ export function registerAssistedRoutes(
     }
   });
 
+  app.get('/api/admin/orders/:orderId/evidence', async (req, res, next) => {
+    try {
+      const admin = await requireUser(req, res, Role.ADMIN);
+      if (!admin) return;
+      const orderId = safeId(req.params.orderId, 'Orden');
+
+      const order = await prisma.laundryOrder.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          evidencePhotos: { orderBy: { createdAt: 'desc' }, take: 40 },
+        },
+      });
+      if (!order) return res.status(404).json({ message: 'Orden no encontrada.' });
+
+      return res.json({
+        evidence: await Promise.all([...order.evidencePhotos].reverse().map((photo) => evidenceDto(photo, true))),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/admin/capabilities', async (req, res, next) => {
     try {
       const admin = await requireUser(req, res, Role.ADMIN);
