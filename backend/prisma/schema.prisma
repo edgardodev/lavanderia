@@ -88,6 +88,7 @@ model User {
   consents          UserConsent[]
 
   @@index([role])
+  @@index([role, isActive, createdAt])
   @@index([lockedUntil])
 }
 
@@ -164,6 +165,8 @@ model Reservation {
 
   @@index([clientId, createdAt])
   @@index([machineId, scheduledStart, scheduledEnd])
+  @@index([branchId, status, scheduledStart])
+  @@index([status, scheduledStart])
   @@index([status])
 }
 
@@ -186,6 +189,7 @@ model MachineSlot {
 
   @@unique([machineId, scheduledStart, scheduledEnd])
   @@index([branchId, scheduledStart])
+  @@index([branchId, type, scheduledStart])
   @@index([type, scheduledStart])
 }
 
@@ -219,6 +223,8 @@ model LaundryOrder {
 
   @@index([clientId, createdAt])
   @@index([branchId])
+  @@index([branchId, status, createdAt])
+  @@index([status, createdAt])
   @@index([status])
 }
 
