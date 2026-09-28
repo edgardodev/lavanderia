@@ -101,8 +101,13 @@ export function assertProductionSecrets() {
   if (process.env.NODE_ENV !== 'production') return;
 
   const jwtSecret = requireProductionValue('JWT_SECRET');
-  if (jwtSecret.length < 32 || jwtSecret.includes('change_me') || jwtSecret.includes('development')) {
-    throw new Error('JWT_SECRET inseguro para producción. Usa un secreto aleatorio de al menos 32 caracteres.');
+  if (
+    jwtSecret.length < 32
+    || jwtSecret.includes('change_me')
+    || jwtSecret.includes('development')
+    || new Set(jwtSecret).size < 10
+  ) {
+    throw new Error('JWT_SECRET inseguro para producción. Usa un secreto aleatorio de alta entropía y al menos 32 caracteres.');
   }
 
   const webOrigin = requireProductionValue('WEB_ORIGIN');
@@ -143,10 +148,36 @@ export function assertProductionSecrets() {
   ]) {
     requireProductionValue(name);
   }
+  for (const name of ['PRIVACY_CONTACT_EMAIL', 'CUSTOMER_SERVICE_EMAIL']) {
+    if (!/^\S+@\S+\.\S+$/.test(String(process.env[name] ?? '').trim())) {
+      throw new Error(`${name} debe ser un correo válido.`);
+    }
+  }
+
+  const cookieDomain = String(process.env.COOKIE_DOMAIN ?? '').trim();
+  if (cookieDomain) {
+    const domain = cookieDomain.replace(/^\./, '').toLowerCase();
+    const hostname = webOriginUrl.hostname.toLowerCase();
+    if (!domain.includes('.') || (hostname !== domain && !hostname.endsWith(`.${domain}`))) {
+      throw new Error('COOKIE_DOMAIN debe corresponder al dominio confiable de WEB_ORIGIN.');
+    }
+  }
 
   const databaseUrl = requireProductionValue('DATABASE_URL');
   if (!databaseUrl.startsWith('mysql://')) {
     throw new Error('DATABASE_URL debe usar MySQL en producción.');
+  }
+  let databaseUrlObject: URL;
+  try {
+    databaseUrlObject = new URL(databaseUrl);
+  } catch {
+    throw new Error('DATABASE_URL no es una URL MySQL válida.');
+  }
+  if (!databaseUrlObject.username || !databaseUrlObject.password) {
+    throw new Error('DATABASE_URL debe usar un usuario de aplicación con contraseña.');
+  }
+  if (decodeURIComponent(databaseUrlObject.username).toLowerCase() === 'root') {
+    throw new Error('DATABASE_URL no debe usar el usuario root en producción.');
   }
 
   if (process.env.WOMPI_ENVIRONMENT !== 'production') {
@@ -163,8 +194,18 @@ export function assertProductionSecrets() {
   if (!integritySecret.startsWith('prod_integrity_') || !eventsSecret.startsWith('prod_events_')) {
     throw new Error('Los secretos Wompi de producción deben corresponder al ambiente de producción.');
   }
-  if (!redirectUrl.startsWith('https://')) {
-    throw new Error('WOMPI_REDIRECT_URL debe usar HTTPS en producción.');
+  let redirectUrlObject: URL;
+  try {
+    redirectUrlObject = new URL(redirectUrl);
+  } catch {
+    throw new Error('WOMPI_REDIRECT_URL debe ser una URL válida.');
+  }
+  if (
+    redirectUrlObject.protocol !== 'https:'
+    || redirectUrlObject.origin !== webOriginUrl.origin
+    || redirectUrlObject.pathname.replace(/\/$/, '') !== '/client/payment-return'
+  ) {
+    throw new Error('WOMPI_REDIRECT_URL debe apuntar por HTTPS a /client/payment-return dentro de WEB_ORIGIN.');
   }
 
   requireProductionValue('FIREBASE_STORAGE_BUCKET');
