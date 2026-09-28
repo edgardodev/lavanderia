@@ -93,6 +93,7 @@ function concurrencyGuard(maxConcurrent: number, label: string) {
 }
 
 const globalConcurrency = concurrencyGuard(boundedInt(process.env.MAX_CONCURRENT_REQUESTS, 120, 20, 500), 'la API');
+const authConcurrency = concurrencyGuard(boundedInt(process.env.MAX_CONCURRENT_AUTH, 4, 1, 16), 'autenticación');
 const uploadConcurrency = concurrencyGuard(boundedInt(process.env.MAX_CONCURRENT_UPLOADS, 6, 1, 20), 'carga de evidencias');
 
 const upload = multer({
@@ -214,10 +215,10 @@ app.use((req, res, next) => {
 });
 app.use(apiLimiter);
 app.use(mutationGuard(allowedOrigins));
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/auth/admin/login', authLimiter);
-app.use('/api/auth/admin/security/password', authLimiter);
+app.use('/api/auth/login', authLimiter, authConcurrency);
+app.use('/api/auth/register', authLimiter, authConcurrency);
+app.use('/api/auth/admin/login', authLimiter, authConcurrency);
+app.use('/api/auth/admin/security/password', authLimiter, authConcurrency);
 app.use('/api/auth/admin/security/mfa', authLimiter);
 app.use('/api/payments/wompi/checkout', paymentLimiter);
 app.use('/api/payments/wompi/webhook', webhookLimiter);
