@@ -35,6 +35,12 @@ function toWompiCents(amountInCop: number) {
   return amountInCop * 100;
 }
 
+function maxPendingReservationsPerClient() {
+  const value = Number(process.env.MAX_PENDING_RESERVATIONS_PER_CLIENT ?? 3);
+  if (!Number.isFinite(value)) return 3;
+  return Math.min(10, Math.max(1, Math.trunc(value)));
+}
+
 function publicClientError(error: unknown, fallback: string) {
   if (process.env.NODE_ENV === 'production') return fallback;
   return error instanceof Error ? error.message : fallback;
@@ -171,6 +177,17 @@ export function registerIdempotentClientServiceRoutes(
 
       const { scheduledStart, scheduledEnd } = await validateReservationSlot(prisma, date, slot);
       const reservation = await prisma.$transaction(async (tx) => {
+        const pendingCount = await tx.reservation.count({
+          where: {
+            clientId: user!.id,
+            status: ReservationStatus.PENDING_PAYMENT,
+            scheduledEnd: { gt: new Date() },
+          },
+        });
+        if (pendingCount >= maxPendingReservationsPerClient()) {
+          throw new Error('Tienes varias reservas pendientes de pago. Completa o deja vencer una antes de crear otra.');
+        }
+
         const machine = await tx.machine.findFirst({
           where: { id: machineId, branchId, isActive: true, branch: { isActive: true } },
         });
