@@ -1,15 +1,38 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import type { LaundryOrder } from '@/types';
+import type { LaundryOrder, OrderEvidence } from '@/types';
 
 export function OrderConversation({ order, onChanged }: { order: LaundryOrder; onChanged: () => void }) {
   const [message, setMessage] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [evidence, setEvidence] = useState<OrderEvidence[]>(order.evidence ?? []);
+  const [evidenceError, setEvidenceError] = useState('');
+  const evidenceKey = useMemo(() => evidence.map((photo) => photo.id).join(','), [order.evidence]);
+
+  useEffect(() => {
+    const metadata = order.evidence ?? [];
+    setEvidence(metadata);
+    setEvidenceError('');
+    if (metadata.length === 0) return;
+
+    let active = true;
+    apiFetch<{ evidence: OrderEvidence[] }>(`/admin/orders/${order.id}/evidence`)
+      .then((data) => {
+        if (active) setEvidence(data.evidence);
+      })
+      .catch((err) => {
+        if (active) setEvidenceError(err instanceof Error ? err.message : 'No se pudieron cargar las fotos.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [order.id, evidenceKey]);
 
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,11 +75,11 @@ export function OrderConversation({ order, onChanged }: { order: LaundryOrder; o
         {(order.messages ?? []).length === 0 && <p className="py-4 text-center text-xs font-bold text-slate-400">Todavía no hay mensajes.</p>}
       </div>
 
-      {(order.evidence ?? []).length > 0 && (
+      {evidence.length > 0 && (
         <div>
           <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Evidencias</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {(order.evidence ?? []).map((photo) => (
+            {evidence.map((photo) => (
               <figure key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                 {photo.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -68,6 +91,7 @@ export function OrderConversation({ order, onChanged }: { order: LaundryOrder; o
               </figure>
             ))}
           </div>
+          {evidenceError && <p className="mt-2 text-xs font-bold text-amber-700">{evidenceError}</p>}
         </div>
       )}
 
