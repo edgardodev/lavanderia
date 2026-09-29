@@ -49,9 +49,14 @@ export default function AssistedPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState('');
+  const [clientName, setClientName] = useState('');
   const requestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    apiFetch<{ user: { name: string } }>('/auth/session?role=client')
+      .then((data) => setClientName(data.user.name.trim()))
+      .catch(() => undefined);
+
     apiFetch<{ branches: Branch[] }>('/branches')
       .then((data) => {
         if (!data.branches.length) return;
@@ -169,6 +174,16 @@ export default function AssistedPage() {
     <>
       <AppHeader />
       <main className="mx-auto grid max-w-7xl gap-8 px-6 py-12 lg:grid-cols-[1fr_0.72fr] lg:items-start">
+        <section className="lg:col-span-2 rounded-[2rem] border border-aqua/15 bg-white/90 px-6 py-6 shadow-[0_20px_60px_rgba(0,193,193,0.08)] md:px-8">
+          <p className="text-xs font-black uppercase tracking-[0.28em] text-aqua">Tu espacio en La Lavandería</p>
+          <p className="mt-2 font-title text-4xl leading-tight text-slate-950 md:text-5xl">
+            Hola{clientName ? ', ' + clientName : ''}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Aquí puedes crear un servicio, pagar y seguir el estado de tu ropa sin mezclar tus servicios anteriores con los que todavía están activos.
+          </p>
+        </section>
+
         <Card>
           <p className="text-xs font-black uppercase tracking-[0.28em] text-aqua">Servicio asistido</p>
           <h1 className="mt-3 font-title text-5xl text-aqua">Lo hacemos por ti</h1>
