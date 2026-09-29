@@ -71,10 +71,8 @@ export default function AssistedPage() {
 
   const loadOrders = useCallback(async () => {
     try {
-      const [activeData, historyData] = await Promise.all([
-        apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=active&limit=20'),
-        apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=history&limit=24'),
-      ]);
+      const activeData = await apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=active&limit=20');
+      const historyData = await apiFetch<{ orders: LaundryOrder[] }>('/client/orders?view=history&limit=24');
       const nextOrders = [...activeData.orders, ...historyData.orders];
       setOrders(nextOrders);
       setSelectedOrderId((current) => (
