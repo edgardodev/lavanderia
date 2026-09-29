@@ -12,6 +12,7 @@ import {
   uploadEvidenceImage,
 } from './firebase.js';
 import type { AuthenticatedUser } from './auth.js';
+import { expireStaleUnpaidOrders } from './payments.js';
 import { boundedLimit, boundedQueryText, optionalFilterId, safeId } from './validation.js';
 
 type RequireUser = (
@@ -248,6 +249,10 @@ export function registerAssistedRoutes(
       const limit = boundedLimit(req.query.limit, 20, 100);
       if (!['active', 'history', 'all'].includes(view)) {
         return res.status(400).json({ message: 'Vista inválida.' });
+      }
+
+      if (view === 'active') {
+        await expireStaleUnpaidOrders(prisma, user.id);
       }
 
       const where: Prisma.LaundryOrderWhereInput = {
