@@ -8,31 +8,62 @@ const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
 const MAX_DIMENSION = 1600;
 
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    const cleanup = () => URL.revokeObjectURL(url);
+    image.onload = () => {
+      cleanup();
+      resolve(image);
+    };
+    image.onerror = () => {
+      cleanup();
+      reject(new Error(`${file.name}: el navegador no pudo leer esta imagen. Usa JPG, PNG o WebP.`));
+    };
+    image.src = url;
+  });
+}
+
 async function compressImage(file: File) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    throw new Error(`${file.name}: formato no permitido.`);
+    throw new Error(`${file.name}: formato no permitido. Usa JPG, PNG o WebP.`);
   }
   if (file.size > MAX_SOURCE_BYTES) {
     throw new Error(`${file.name}: la imagen original supera 12 MB.`);
   }
 
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const image = await loadImage(file);
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error(`${file.name}: la imagen no tiene dimensiones válidas.`);
+  }
+
+  const scale = Math.min(1, MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d');
   if (!context) {
-    bitmap.close();
     throw new Error('No se pudo preparar la imagen.');
   }
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
+  context.drawImage(image, 0, 0, width, height);
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
-  if (!blob) throw new Error(`${file.name}: no se pudo comprimir.`);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    try {
+      canvas.toBlob(
+        (result) => result
+          ? resolve(result)
+          : reject(new Error(`${file.name}: no se pudo comprimir.`)),
+        'image/webp',
+        0.82,
+      );
+    } catch {
+      reject(new Error(`${file.name}: el navegador no pudo convertir la imagen.`));
+    }
+  });
   if (blob.size > MAX_UPLOAD_BYTES) {
     throw new Error(`${file.name}: sigue siendo demasiado grande después de comprimir.`);
   }
