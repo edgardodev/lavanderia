@@ -168,6 +168,43 @@ async function main() {
     body: { type: 'order', id: order1.data.order.id },
   });
 
+  const staleOrderKey = `ci_stale_ord_${unique}`;
+  const staleOrder = await api(client, '/orders', {
+    method: 'POST',
+    expected: [201],
+    headers: { 'Idempotency-Key': staleOrderKey },
+    body: {
+      branchId: branch.id,
+      cycleType: 'WASH',
+      pickupType: 'STORE',
+      pieces: 4,
+      stainService: false,
+      notes: 'Smoke vencimiento por falta de pago',
+    },
+  });
+  await prisma.laundryOrder.update({
+    where: { id: staleOrder.data.order.id },
+    data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+  });
+  const activeAfterExpiry = await api(client, '/client/orders?view=active&limit=20');
+  assert(
+    !activeAfterExpiry.data?.orders?.some((order) => order.id === staleOrder.data.order.id),
+    'Una orden sin pago con más de 24 horas siguió apareciendo como activa.',
+  );
+  const expiredOrder = await prisma.laundryOrder.findUnique({
+    where: { id: staleOrder.data.order.id },
+    select: {
+      status: true,
+      statusHistory: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true, message: true } },
+    },
+  });
+  assert(
+    expiredOrder?.status === 'CANCELLED'
+      && expiredOrder.statusHistory[0]?.status === 'CANCELLED'
+      && expiredOrder.statusHistory[0]?.message?.includes('venció automáticamente'),
+    'La orden vencida no quedó cancelada con trazabilidad.',
+  );
+
   const admin = new CookieJar();
   const firstAdminLogin = await api(admin, '/auth/admin/login', { method: 'POST', expected: [428], body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
   assert(firstAdminLogin.data?.setupRequired && admin.get('admin_preauth'), 'Bootstrap admin no inició configuración segura.');
@@ -309,7 +346,7 @@ async function main() {
   assert(refreshed?.status === 'PRE_WASH', 'Cliente no ve estado actualizado.');
   assert(refreshed?.messages?.some((m) => m.message.includes('Mensaje smoke')), 'Cliente no ve mensaje admin.');
 
-  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'admin-credential-creation', 'local-evidence-capability', 'role-isolated-sessions', 'role-cookie-csrf', 'active-history-views', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
+  console.log(JSON.stringify({ ok: true, checks: ['health', 'holiday-hours', 'moved-holiday-hours', 'auth', 'migrations-seed', 'reservation-idempotency', 'reservation-hold-expiry', 'order-idempotency', 'assisted-unpaid-expiry', 'quote-before-payment', 'admin-mfa', 'preauth-csrf', 'csrf', 'admin-credential-creation', 'local-evidence-capability', 'role-isolated-sessions', 'role-cookie-csrf', 'active-history-views', 'server-side-filters', 'dashboard-summary', 'variable-pricing', 'payment-gate', 'concurrent-status', 'admin-workflow'] }));
 }
 
 main()
