@@ -36,6 +36,12 @@ function reservationHoldMinutes() {
   return Math.min(60, Math.max(5, Math.trunc(value)));
 }
 
+function assistedUnpaidTtlHours() {
+  const value = Number(process.env.ASSISTED_UNPAID_TTL_HOURS ?? 24);
+  if (!Number.isFinite(value)) return 24;
+  return Math.min(168, Math.max(1, Math.trunc(value)));
+}
+
 const FINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.APPROVED,
   PaymentStatus.DECLINED,
@@ -98,6 +104,79 @@ function buildCheckout(payment: {
       },
     },
   };
+}
+
+export async function expireStaleUnpaidOrders(prisma: PrismaClient, clientId?: string) {
+  const ttlHours = assistedUnpaidTtlHours();
+  const cutoff = new Date(Date.now() - ttlHours * 60 * 60 * 1000);
+  const pricingReadyWhere: Prisma.LaundryOrderWhereInput[] = [
+    {
+      OR: [
+        { pickupType: { not: 'DELIVERY' } },
+        { deliveryFeeCents: { not: null } },
+      ],
+    },
+    {
+      OR: [
+        { stainService: false },
+        { stainFeeCents: { not: null } },
+      ],
+    },
+  ];
+
+  const stale = await prisma.laundryOrder.findMany({
+    where: {
+      ...(clientId ? { clientId } : {}),
+      status: OrderStatus.QUEUED,
+      paymentId: null,
+      createdAt: { lt: cutoff },
+      AND: pricingReadyWhere,
+    },
+    select: { id: true, clientId: true, branchId: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  });
+
+  let expiredCount = 0;
+  for (const order of stale) {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.laundryOrder.updateMany({
+        where: {
+          id: order.id,
+          status: OrderStatus.QUEUED,
+          paymentId: null,
+          createdAt: { lt: cutoff },
+          AND: pricingReadyWhere,
+        },
+        data: { status: OrderStatus.CANCELLED },
+      });
+      if (claimed.count !== 1) return;
+
+      await tx.statusHistory.create({
+        data: {
+          orderId: order.id,
+          status: OrderStatus.CANCELLED,
+          message: `La solicitud venció automáticamente porque no se completó el pago dentro de ${ttlHours} horas.`,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: 'ORDER_UNPAID_EXPIRED',
+          entity: 'LAUNDRY_ORDER',
+          entityId: order.id,
+          metadata: {
+            clientId: order.clientId,
+            branchId: order.branchId,
+            ttlHours,
+            createdAt: order.createdAt.toISOString(),
+          },
+        },
+      });
+      expiredCount += 1;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  return expiredCount;
 }
 
 export async function releaseExpiredWompiCheckouts(prisma: PrismaClient) {
@@ -203,6 +282,8 @@ export async function releaseExpiredWompiCheckouts(prisma: PrismaClient) {
       }
     });
   }
+
+  await expireStaleUnpaidOrders(prisma);
 }
 
 async function ownedResource(
