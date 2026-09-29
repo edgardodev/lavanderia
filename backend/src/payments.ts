@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { PaymentStatus, PrismaClient, ReservationStatus, Role } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma, PrismaClient, ReservationStatus, Role } from '@prisma/client';
 import { nanoid } from 'nanoid';
 import {
   createWompiIntegritySignature,
