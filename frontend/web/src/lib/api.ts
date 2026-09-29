@@ -5,6 +5,34 @@ export function apiUrl(path: string) {
   return `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+export async function apiBlob(path: string): Promise<Blob> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(path), {
+      method: 'GET',
+      credentials: 'include',
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('La foto tardó demasiado en cargar.');
+    }
+    throw new Error('No se pudo cargar la foto.');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'No se pudo cargar la foto.' }));
+    throw new Error(error.message ?? 'No se pudo cargar la foto.');
+  }
+
+  return response.blob();
+}
+
 export class ApiError extends Error {
   status: number;
   data: unknown;
