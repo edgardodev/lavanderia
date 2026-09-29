@@ -1,9 +1,58 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiBlob, apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import type { LaundryOrder, OrderEvidence } from '@/types';
+
+function AdminEvidencePhotoCard({ photo }: { photo: OrderEvidence }) {
+  const [src, setSrc] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    setSrc('');
+    setLoadError('');
+    if (!photo.url) return;
+
+    if (/^https?:\/\//i.test(photo.url)) {
+      setSrc(photo.url);
+      return;
+    }
+
+    let active = true;
+    let objectUrl = '';
+    apiBlob(photo.url)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch((err) => {
+        if (active) setLoadError(err instanceof Error ? err.message : 'No se pudo cargar la foto.');
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [photo.url]);
+
+  return (
+    <figure className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <a href={src} target="_blank" rel="noreferrer">
+          <img src={src} alt={photo.description} className="h-24 w-full object-cover" loading="lazy" />
+        </a>
+      ) : (
+        <div className="grid h-24 place-items-center bg-slate-100 px-2 text-center text-[10px] font-bold text-slate-400">
+          {loadError || 'Cargando foto...'}
+        </div>
+      )}
+      <figcaption className="line-clamp-2 px-2 py-2 text-[10px] font-bold text-slate-500">{photo.description}</figcaption>
+    </figure>
+  );
+}
 
 export function OrderConversation({ order, onChanged }: { order: LaundryOrder; onChanged: () => void }) {
   const [message, setMessage] = useState('');
@@ -12,7 +61,7 @@ export function OrderConversation({ order, onChanged }: { order: LaundryOrder; o
   const [error, setError] = useState('');
   const [evidence, setEvidence] = useState<OrderEvidence[]>(order.evidence ?? []);
   const [evidenceError, setEvidenceError] = useState('');
-  const evidenceKey = useMemo(() => evidence.map((photo) => photo.id).join(','), [order.evidence]);
+  const evidenceKey = useMemo(() => (order.evidence ?? []).map((photo) => photo.id).join(','), [order.evidence]);
 
   useEffect(() => {
     const metadata = order.evidence ?? [];
@@ -79,17 +128,7 @@ export function OrderConversation({ order, onChanged }: { order: LaundryOrder; o
         <div>
           <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Evidencias</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {evidence.map((photo) => (
-              <figure key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                {photo.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.description} className="h-24 w-full object-cover" loading="lazy" /></a>
-                ) : (
-                  <div className="grid h-24 place-items-center bg-slate-100 px-2 text-center text-[10px] font-bold text-slate-400">Vista temporal no disponible</div>
-                )}
-                <figcaption className="line-clamp-2 px-2 py-2 text-[10px] font-bold text-slate-500">{photo.description}</figcaption>
-              </figure>
-            ))}
+            {evidence.map((photo) => <AdminEvidencePhotoCard key={photo.id} photo={photo} />)}
           </div>
           {evidenceError && <p className="mt-2 text-xs font-bold text-amber-700">{evidenceError}</p>}
         </div>
