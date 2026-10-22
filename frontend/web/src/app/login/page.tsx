@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ShieldCheck, UserRound } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { Button, Card, Field, Input } from "@/components/ui";
@@ -18,7 +17,6 @@ function safeNextPath(value: string | null, role: string) {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<LoginMode>("CLIENT");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
