@@ -197,7 +197,9 @@ export default function AdminDashboardPage() {
       const params = new URLSearchParams({ date: machineBoardDate });
       if (branchFilter !== 'all') params.set('branchId', branchFilter);
       const data = await apiFetch<{ reservations: Reservation[] }>(`/admin/reservations?${params.toString()}`);
-      setReservations(data.reservations);
+      setReservations(data.reservations.filter((reservation) =>
+        reservation.status === 'PENDING_PAYMENT' || reservation.status === 'CONFIRMED',
+      ));
     } catch (error) {
       setReservations([]);
       recordLoadError(error);
