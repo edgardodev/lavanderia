@@ -93,12 +93,14 @@ export function AppHeader() {
               <Link href="/client/dashboard" className="rounded-full px-3 py-2 hover:bg-white/15">Panel</Link>
               <Link href="/client/self-service" className="rounded-full px-3 py-2 hover:bg-white/15">Autoservicio</Link>
               <Link href="/client/assisted" className="rounded-full px-3 py-2 hover:bg-white/15">Lo hacemos por ti</Link>
+              <Link href="/login?role=admin" className="rounded-full border border-white/30 px-3 py-2 hover:bg-white/15">Admin</Link>
               <button type="button" onClick={() => void signOut()} disabled={signingOut} className="rounded-full bg-yellowBrand px-4 py-2 text-slate-950 hover:opacity-90 disabled:opacity-60">
                 {signingOut ? 'Saliendo...' : 'Salir'}
               </button>
             </nav>
             <nav className="flex items-center gap-2 text-xs font-black text-white md:hidden">
               <Link href="/client/dashboard" className="rounded-full px-3 py-2 hover:bg-white/15">Panel</Link>
+              <Link href="/login?role=admin" className="rounded-full px-3 py-2 hover:bg-white/15">Admin</Link>
               <button type="button" onClick={() => void signOut()} disabled={signingOut} className="rounded-full bg-yellowBrand px-3 py-2 text-slate-950 disabled:opacity-60">Salir</button>
             </nav>
           </>
