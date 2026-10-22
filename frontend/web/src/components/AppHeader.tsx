@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Logo } from './Logo';
 
@@ -14,7 +14,6 @@ type SessionUser = {
 };
 
 export function AppHeader() {
-  const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [signingOut, setSigningOut] = useState(false);
@@ -50,8 +49,7 @@ export function AppHeader() {
     } finally {
       setUser(null);
       setSigningOut(false);
-      router.replace('/login');
-      router.refresh();
+      window.location.assign('/login');
     }
   }
 
