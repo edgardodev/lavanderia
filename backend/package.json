@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
-    "dev:approve-reservation": "node --env-file=.env scripts/local-approve-reservation.mjs"
+    "dev:approve-reservation": "node --env-file=.env scripts/local-approve-reservation.mjs",
+    "dev:approve-order": "node --env-file=.env scripts/local-approve-order.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
