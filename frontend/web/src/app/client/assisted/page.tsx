@@ -78,7 +78,7 @@ export default function AssistedPage() {
       setSelectedOrderId((current) => (
         current && nextOrders.some((order) => order.id === current)
           ? current
-          : activeData.orders[0]?.id ?? historyData.orders[0]?.id ?? null
+          : activeData.orders[0]?.id ?? null
       ));
       setHistoryError('');
     } catch (err) {
@@ -113,8 +113,8 @@ export default function AssistedPage() {
     [orders],
   );
   const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) ?? activeOrders[0] ?? pastOrders[0],
-    [orders, selectedOrderId, activeOrders, pastOrders],
+    () => orders.find((order) => order.id === selectedOrderId) ?? activeOrders[0],
+    [orders, selectedOrderId, activeOrders],
   );
 
   const createdOrder = useMemo(
@@ -257,7 +257,11 @@ export default function AssistedPage() {
           <Card>
             <h2 className="text-2xl font-black text-slate-950">Seguimiento de ropa</h2>
             <p className="mt-2 text-sm text-slate-500">Aquí ves el avance solamente de los servicios que entregas al equipo para que nosotros hagamos el proceso.</p>
-            {selectedOrder?.paymentStatus === 'APPROVED' ? (
+            {selectedOrder?.status === 'CANCELLED' ? (
+              <p className="mt-6 rounded-3xl bg-slate-100 p-4 text-sm font-bold text-slate-600">
+                Este servicio fue cancelado y quedó guardado en el historial. Puedes consultar sus movimientos, fotos y mensajes seleccionándolo en “Historial”.
+              </p>
+            ) : selectedOrder?.paymentStatus === 'APPROVED' ? (
               <div className="mt-6">
                 <StatusTimeline currentStatus={selectedOrder.status} pickupType={selectedOrder.pickupType} />
               </div>
@@ -348,7 +352,7 @@ export default function AssistedPage() {
                     <p className="font-black text-slate-950">{branchName(selectedOrder)} · {cycleLabels[selectedOrder.cycleType]}</p>
                     <p className="mt-1 text-sm text-slate-500">{selectedOrder.pickupType === 'DELIVERY' ? 'Domicilio' : 'Recoge en sede'}</p>
                   </div>
-                  {selectedOrder.paymentStatus === 'APPROVED' ? (
+                  {selectedOrder.status === 'CANCELLED' || selectedOrder.paymentStatus === 'APPROVED' ? (
                     <StatusBadge status={selectedOrder.status} />
                   ) : (
                     <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">
