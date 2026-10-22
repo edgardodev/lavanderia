@@ -15,7 +15,7 @@
     "dev:approve-order": "node --env-file=.env scripts/local-approve-order.mjs"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^7.10.1",
     "argon2": "^0.41.0",
     "compression": "^1.7.5",
     "cookie-parser": "^1.4.7",
