@@ -51,11 +51,10 @@ export default function LoginPage() {
       );
       const params = new URLSearchParams(window.location.search);
       const next = safeNextPath(params.get("next"), data.user.role);
-      router.refresh();
-      router.push(next);
+      window.location.assign(next);
     } catch (err) {
       if (mode === "ADMIN" && err instanceof ApiError && err.status === 428) {
-        router.push("/admin/security/setup");
+        window.location.assign("/admin/security/setup");
         return;
       }
       setError(err instanceof Error ? err.message : "Error al iniciar sesión");
